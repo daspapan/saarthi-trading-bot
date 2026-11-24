@@ -115,9 +115,12 @@ describe("API-02 running a backtest end to end (worker thread)", () => {
     const { call, close } = await serve(true);
     const data = (await call("GET", "/backtests/data")).body;
     const body = { strategy: "all", from: data.range.from, to: data.range.to, slippageBps: 5, label: "baseline" };
-    const [first, second] = await Promise.all([call("POST", "/backtests", body), call("POST", "/backtests", body)]);
-    expect(first.status).toBe(202);
-    expect(second.status).toBe(409);
+    // Two requests at once. Which one the server sees first depends on the machine,
+    // so check that exactly one was accepted and the other refused, in either order.
+    const both = await Promise.all([call("POST", "/backtests", body), call("POST", "/backtests", body)]);
+    const first = both.find((r) => r.status === 202)!;
+    const second = both.find((r) => r !== first)!;
+    expect(both.map((r) => r.status).sort()).toEqual([202, 409]);
     expect(second.body.error).toMatch(/still running/);
 
     const run = await waitDone(call, first.body.id);

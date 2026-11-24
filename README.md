@@ -8,7 +8,7 @@ Based on the LinkedIn articles "Trading Bot Part 01: What the YouTube video didn
 
 ## Status
 
-Phase 5 of 9 done.
+Phase 6 of 9 done.
 
 - Phase 1: workspace skeleton, config loading, SQLite migrations, testnet-only guard, `/health`, one-command start.
 - Phase 2: two live price feeds (Binance Spot Testnet plus a public cross-check), 1m/15m/4h candles, `price_state` every 5 seconds, the stale and disagreement pause, exchange health checks, gap backfill, and a live health strip with price tiles.
@@ -18,7 +18,9 @@ Phase 5 of 9 done.
 
 - Phase 5: the deterministic 12-rule validator (checked against live state) and the order queue (dedupe, oldest first, stale items dropped, discard on kill switch), with each rule's result on the AI Analyst cards.
 
-No orders are placed yet: the executor comes next.
+- Phase 6: the executor. One state machine (queued, re-check, place, wait for fill, place stop and target, open, closed) saved after every step, crash recovery and reconciliation on start, a simulated paper exchange and a Binance Spot Testnet client behind the same interface, and the Orders page.
+
+Trading defaults to paper mode. The risk monitor and kill switch come next.
 
 ## Setup on a Mac
 
@@ -56,6 +58,26 @@ ollama pull qwen2.5:7b     # about 4.7 GB
 
 Then open http://127.0.0.1:3000/analyst and press **Analyse now**. The analyst also runs by itself every 15 minutes (`ANALYSIS_INTERVAL_MIN`). While the price feeds are paused it records "skipped: data not trusted" instead of calling the model.
 
+### Trading on the Binance Spot Testnet (optional)
+
+Paper mode (the default) needs nothing else. To trade on the real testnet with virtual funds:
+
+1. Log in at https://testnet.binance.vision with GitHub and generate an HMAC API key.
+2. Put the key in `.env.local` (gitignored; only the executor loads it):
+
+   ```bash
+   BINANCE_API_KEY=...
+   BINANCE_API_SECRET=...
+   ```
+
+3. Set `TRADING_MODE=testnet` in `.env` and restart `npm run dev`.
+
+The executor refuses to start in testnet mode without keys, and the client refuses any URL that isn't `testnet.binance.vision`. To run the exchange contract tests against the real testnet (they place a few tiny orders and cancel or sell them straight back):
+
+```bash
+SAARTHI_TESTNET_CONTRACT=1 node --env-file=.env.local node_modules/.bin/vitest run apps/executor/test/contract.test.ts
+```
+
 ### Optional: a PIN (needed for phone access later)
 
 ```bash
@@ -78,7 +100,7 @@ npm run typecheck    # TypeScript check, no output means OK
 apps/api        Express HTTP API (and SSE later)
 apps/feed       market data process
 apps/analyst    AI analyst process (never has keys)
-apps/executor   the only process with exchange keys
+apps/executor   the only process with exchange keys: state machine loop, Binance testnet client
 apps/risk       risk monitor and kill switch
 apps/web        Next.js dashboard
 packages/core   shared config, database, logger, and later indicators, validator, state machine
@@ -135,6 +157,12 @@ After the guardrails, every "long" or "exit" signal goes through the 12-rule val
 `POST /analyse`: "Analyse now". Returns `202 { requestId, analystRunning, message }`.
 
 The analyst's token (in `data/analyst.token`, created by the API) may read anything but write only to `/signals` and `/signals/heartbeat`; anything else gets 403.
+
+`GET /orders?limit=30`: newest first, `{ states, orders: [{ id, pair, direction, side, type, state, quantity, filled, entryPrice, avgFillPrice, stopPrice, targetPrice, error, createdAt, updatedAt, events: [{ from, to, detail, at }] }] }`. `state` is one of `QUEUED`, `PRECHECK`, `PLACE_ENTRY`, `CONFIRM_FILL`, `PLACE_PROTECTION`, `OPEN`, `CLOSED`, `CANCELLED`, `FAILED`, `EMERGENCY_CLOSE`.
+
+`GET /positions`: open positions, `{ positions: [{ id, pair, quantity, avgEntry, stopPrice, targetPrice, lastPrice, feesPaid, unrealisedPnl, unrealisedPct, progress, openedAt }] }`. `unrealisedPnl` is what selling at the last price would leave after the entry fee and an estimated 0.1% exit fee. `progress` is 0 at the stop and 1 at the target.
+
+`GET /trades?limit=50`: closed trades, `{ trades: [{ orderId, pair, quantity, entryPrice, exitPrice, entryFee, exitFee, realisedPnl, closeReason, openedAt, closedAt }], totals: { count, wins, realisedPnl, fees } }`. All P&L is after fees. `realisedPnl` is `null` for a position that was closed outside Saarthi (testnet reset), because the exit price is unknown.
 
 `GET /settings`: both config files (`strategy`, `risk`) with each setting's value, allowed range and plain-language help.
 

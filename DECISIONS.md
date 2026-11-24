@@ -211,3 +211,31 @@ The validator and "what happened next" boxes are placeholders until phases 5 and
 **On the cards,** "Validator rules" shows the 12-line checklist. Passed rules are compact, with the full message on hover; failed rules show their reason in red. "What happened next" shows the queue outcome: queued as order #N, discarded or dropped with the reason, not queued with the failed rule numbers, or a duplicate. Orders themselves start in phase 6.
 
 **Phase 5 test IDs:** VAL-01 to VAL-15 (a passing and a failing case for each of the 12 rules, plus every-rule-reported, purity and no-margin), Q-01 to Q-06, plus API flow tests (signal → guardrails → validator → queue, AUD-01 ordering) and UI-03/UI-04 display logic.
+
+## Phase 6
+
+**One interface, two exchanges.** The executor only ever talks to `ExchangeClient`. `PaperExchange` (a matching engine on the same SQLite file) and `BinanceTestnetClient` both implement it, and `createExchangeClient` in `apps/executor/src/client.ts` is the only code that looks at `TRADING_MODE` (PAPER-02 checks the executor's own files never do). The same contract suite runs against paper, against the Binance client talking to a Binance-format fake, and against the real testnet when keys are present and `SAARTHI_TESTNET_CONTRACT=1` is set.
+
+**ccxt for signing and error classes, raw endpoints for everything else.** The Binance client calls `/api/v3/order`, `/orderList/oco` and friends directly through ccxt's generated methods and maps the fields itself. This avoids `loadMarkets`, which would also call mainnet-only endpoints, and keeps the mapping readable in one file. After `setSandboxMode(true)` every REST base URL is checked with the same `assertTestnetUrl` as the config, and the constructor refuses a mainnet client (TN-01 tests).
+
+**Client order IDs.** Binance allows 36 characters. The entry uses `sa` + the first 30 hex characters of the queue's dedupe ID (32 characters). The OCO uses `-o`, `-s`, `-t` suffixes, emergency sells `-e1`, `-e2`, and so on. On every retry and on resume, the executor first asks the exchange for that client ID and adopts the order if it exists, so a lost reply can never cause a second order (EX-13). Reconciliation treats any open order whose first 32 characters don't match one of our orders as foreign and cancels it.
+
+**OCO generations.** If an OCO is cancelled outside Saarthi, the replacement can't reuse the client IDs (the exchange refuses duplicates), so it becomes generation 2 (`-o2`, `-s2`, `-t2`). Found by a test: without this, re-protecting would fail and trigger an emergency sale.
+
+**The stop-limit price** sits 0.5% below the stop trigger, so the sell still fills in a fast drop. A gap below that can leave the stop unfilled; phase 7's risk monitor watches for a position below its stop.
+
+**Timeouts and retries.** Limit entries are cancelled after 60 s unfilled, market orders after 10 s. Placing an entry is tried 4 times (1 s, 2 s, 4 s backoff) for network errors and HTTP 429; a refusal (bad price, too small) or insufficient balance fails at once with the exchange's reason. Placing the OCO gets one retry for network errors only; after that the position is sold at market, the kill switch goes on and pending queue items are discarded. The emergency sale never gives up: it retries with backoff (capped at 30 s) and sends a critical alert on every failure.
+
+**A partial fill** at the timeout: the rest is cancelled and the OCO protects exactly what filled, floored to the lot size and capped at the free balance (a fee taken in the coin would otherwise make the OCO too big).
+
+**Fees.** Paper fees are 0.1% in USDT, and paper fills get the same 5 bps slippage as the backtester, including limit fills (pessimistic on purpose). From Binance, fees are converted to USDT: a fee in the coin is valued at the fill price, a fee in BNB is counted as 0.1% of the fill value. Every P&L figure stored or shown is after both fees.
+
+**Reconciliation on start** runs before the first tick and blocks trading until it succeeds. Foreign open orders are cancelled. An order we're waiting on that the exchange never saw (testnet reset) is cancelled. A position whose coins are gone is closed as `reconciled` with P&L unknown (`null`), never a guessed number. A position whose OCO is missing is protected again. Every decision is audited.
+
+**Equity** is recorded every 30 s from the exchange's balances: USDT plus the traded coins at the feed's last price. Other coins the testnet gives every account (it starts with dozens) are ignored, so equity means "what Saarthi trades with". Equity isn't recorded until the feed has a price for every pair.
+
+**Bug found while testing:** the paper exchange released an OCO's locked coins only when the *last* leg was cancelled, but the lock was stored on one leg. Cancelling the stop leg first lost the lock. The lock now moves to the remaining leg.
+
+**One more small change:** the analyst's config loader now checks whether key variables exist with `in`, without reading their values, so the runtime part of EX-19 can prove that only the executor reads them.
+
+**Phase 6 test IDs:** EX-01 to EX-19 (EX-11 is parametrised over every state, including "the exchange call succeeded but the crash came before saving"), PAPER-01 (contract suite) and PAPER-02, TN-01 for the client's URL guard, API tests for `/orders`, `/positions`, `/trades`, and UI-13 display logic for the stepper and P&L wording.

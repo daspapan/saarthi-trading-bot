@@ -10,6 +10,8 @@ const RISK_FLAGS = ["kill_switch", "manual_restart", "daily_limit_hit", "feeds_p
 // Trading tables cleared by a reset, children before parents (foreign keys).
 // audit_log is NOT cleared: it is append-only by design. A reset is itself audited (phase 8).
 const RESET_TABLES = [
+  "paper_orders",
+  "paper_balances",
   "order_events",
   "fills",
   "positions",
@@ -32,6 +34,8 @@ export function seedPaper(db: Db): void {
       `INSERT INTO equity_snapshots (equity, cash, high_water_mark, day_start_equity, created_at)
        VALUES (?, ?, ?, ?, ?)`,
     ).run(SEED_EQUITY_USDT, SEED_EQUITY_USDT, SEED_EQUITY_USDT, SEED_EQUITY_USDT, now);
+    // The simulated exchange starts with the same 10,000 USDT.
+    db.prepare("INSERT INTO paper_balances (asset, free, locked) VALUES ('USDT', ?, 0)").run(SEED_EQUITY_USDT);
     const flag = db.prepare("INSERT INTO risk_flags (name, active, reason, updated_at) VALUES (?, ?, ?, ?)");
     for (const name of RISK_FLAGS) {
       // Fail closed: prices are not trusted until the feed process has checked them.

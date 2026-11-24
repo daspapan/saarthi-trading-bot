@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@saarthi/core": "*"
+    "@saarthi/core": "*",
+    "ccxt": "^4.5.94"
   }
 }

@@ -183,7 +183,8 @@ export function loadBaseEnv(env: Env = process.env): BaseEnv {
  * If any key variable exists at all (even empty), refuse to start.
  */
 export function loadAnalystEnv(env: Env = process.env): BaseEnv {
-  const leaked = SECRET_ENV_KEYS.filter((k) => env[k] !== undefined);
+  // `in` checks presence without reading the value (EX-19: only the executor reads key values).
+  const leaked = SECRET_ENV_KEYS.filter((k) => k in env);
   if (leaked.length > 0) {
     throw new ConfigError(
       `The analyst must never see exchange keys, but found: ${leaked.join(", ")}. ` +

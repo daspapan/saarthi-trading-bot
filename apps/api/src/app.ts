@@ -30,6 +30,7 @@ import {
   prepareBacktestRequest,
   readProcessStatus,
 } from "@saarthi/core";
+import { readOrders, readPositions, readTrades } from "./trading.ts";
 import { readCandleFiles, readCandles, readExchange, readFeeds, readPrices } from "./reads.ts";
 
 const PAIR_PATTERN = /^[A-Z0-9]{2,10}\/[A-Z0-9]{2,10}$/;
@@ -137,6 +138,20 @@ export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string } 
   app.get("/queue", (req, res) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 50) || 50));
     res.json({ items: listQueue(db, limit) });
+  });
+
+  app.get("/orders", (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 30) || 30));
+    res.json(readOrders(db, limit));
+  });
+
+  app.get("/positions", (_req, res) => {
+    res.json({ positions: readPositions(db) });
+  });
+
+  app.get("/trades", (req, res) => {
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit ?? 50) || 50));
+    res.json(readTrades(db, limit));
   });
 
   app.get("/snapshots/:hash", (req, res) => {
