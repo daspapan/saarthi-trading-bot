@@ -1,6 +1,7 @@
 // POST /kill, POST /restart, GET /risk, GET /alerts (RISK-08, RISK-10, RISK-11, API-02, API-03).
 
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 import { getRiskFlag, hashPin, loadBaseEnv, raiseAlert } from "@saarthi/core";
 import { tempDb, validEnv } from "../../../packages/core/test/helpers.ts";
 import { createApp } from "../src/app.ts";
@@ -9,7 +10,7 @@ const PIN_HASH = hashPin("2468");
 
 async function serve(pinHash: string | null = PIN_HASH) {
   const { db } = tempDb();
-  const env = { ...loadBaseEnv(validEnv()), pinHash, configDir: new URL("../../../config", import.meta.url).pathname };
+  const env = { ...loadBaseEnv(validEnv()), pinHash, configDir: join(import.meta.dirname, "..", "..", "..", "config") };
   const app = createApp(db, env, { analystToken: "t".repeat(64) });
   const server = app.listen(0, "127.0.0.1");
   await new Promise((r) => server.once("listening", r));
