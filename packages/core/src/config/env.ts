@@ -39,10 +39,28 @@ export const KNOWN_PRICE_CHECK_ORIGINS = [
   "wss://ws-feed.exchange.coinbase.com",
 ] as const;
 
+/**
+ * Two years of history for backtests come from Binance's public market-data
+ * host. It serves prices only: it has no order or account endpoints at all.
+ */
+export const KNOWN_HISTORY_ORIGINS = ["https://data-api.binance.vision"] as const;
+
+/** Checks HISTORY_BASE_URL (used only by npm run candles:download). */
+export function loadHistoryUrl(env: Env = process.env): string {
+  const url = env.HISTORY_BASE_URL || "https://data-api.binance.vision";
+  const origin = originOf(url);
+  const allowed: readonly string[] = KNOWN_HISTORY_ORIGINS;
+  if (!origin || !allowed.includes(origin)) {
+    throw new ConfigError(`HISTORY_BASE_URL="${url}" is not allowed. Use ${KNOWN_HISTORY_ORIGINS.join(", ")} (market data only).`);
+  }
+  return url;
+}
+
 export type BaseEnv = {
   tradingMode: TradingMode;
   dbPath: string;
   configDir: string;
+  candlesDir: string;
   apiPort: number;
   apiHost: string;
   allowLan: boolean;
@@ -134,6 +152,7 @@ export function loadBaseEnv(env: Env = process.env): BaseEnv {
     tradingMode: parseMode(env.TRADING_MODE),
     dbPath: env.DB_PATH || "./data/saarthi.db",
     configDir: env.CONFIG_DIR || "./config",
+    candlesDir: env.CANDLES_DIR || "./data/candles",
     apiPort: parseIntSafe("API_PORT", env.API_PORT, 4000),
     apiHost: env.API_HOST || "127.0.0.1",
     allowLan: parseBool(env.ALLOW_LAN),

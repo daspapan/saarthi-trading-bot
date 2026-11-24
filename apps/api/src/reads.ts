@@ -1,6 +1,16 @@
 // Read-only queries behind the GET endpoints. Shapes are documented in README.md.
 
-import { type Db, FEED_MONITOR_MAX_AGE_MS, FEED_SOURCE, type Timeframe, latestCandles, readFeedTrust } from "@saarthi/core";
+import { statSync } from "node:fs";
+import {
+  type Db,
+  FEED_MONITOR_MAX_AGE_MS,
+  FEED_SOURCE,
+  type Timeframe,
+  candleCsvPath,
+  latestCandles,
+  readCandlesCsv,
+  readFeedTrust,
+} from "@saarthi/core";
 
 export type FeedView = {
   id: "A" | "B";
@@ -129,4 +139,40 @@ export function readCandles(db: Db, pair: string, timeframe: Timeframe, limit: n
     close: c.close,
     volume: c.volume,
   }));
+}
+
+// ---------- downloaded history for backtests ----------
+
+type FileInfo = { pair: string; timeframe: Timeframe; candles: number; first: number | null; last: number | null };
+const fileCache = new Map<string, { mtimeMs: number; info: FileInfo }>();
+
+function fileInfo(dir: string, pair: string, timeframe: Timeframe): FileInfo {
+  const path = candleCsvPath(dir, pair, timeframe);
+  let mtimeMs = -1;
+  try {
+    mtimeMs = statSync(path).mtimeMs;
+  } catch {
+    return { pair, timeframe, candles: 0, first: null, last: null };
+  }
+  const cached = fileCache.get(path);
+  if (cached && cached.mtimeMs === mtimeMs) return cached.info;
+  const candles = readCandlesCsv(path, pair, timeframe);
+  const info = { pair, timeframe, candles: candles.length, first: candles[0]?.openTimeMs ?? null, last: candles.at(-1)?.openTimeMs ?? null };
+  fileCache.set(path, { mtimeMs, info });
+  return info;
+}
+
+/** What history is on disk, and the date range every pair's 15m data covers. */
+export function readCandleFiles(dir: string, pairs: readonly string[]) {
+  const files = pairs.flatMap((p) => (["15m", "1h"] as const).map((tf) => fileInfo(dir, p, tf)));
+  const m15 = files.filter((f) => f.timeframe === "15m");
+  const ready = m15.length > 0 && m15.every((f) => f.candles > 0);
+  const from = ready ? Math.max(...m15.map((f) => f.first!)) : null;
+  const to = ready ? Math.min(...m15.map((f) => f.last! + 900_000)) : null;
+  return {
+    pairs,
+    files,
+    range: from !== null && to !== null && from < to ? { from, to } : null,
+    hint: ready ? null : "No history yet. Run: npm run candles:download (about 2 minutes, read-only market data).",
+  };
 }

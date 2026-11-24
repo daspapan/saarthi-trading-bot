@@ -77,3 +77,60 @@ Where the prompt left room, I picked the simpler option and wrote it down here.
 **I couldn't reach the live streams from my workspace** (the sandbox blocks exchange hosts). Every scenario is tested against fake sockets, a fake REST server and a fake clock. I checked the screens by running the real feed service with a scripted stream of realistic Binance and Bybit messages. The first run against the real testnet is the one step to confirm on your Mac.
 
 **Phase 2 test IDs:** FEED-01 to FEED-08 (all), plus API-02 and API-03 for `/health`, `/prices` and `/candles`, and UI-01 display logic for the health strip. The Playwright browser scene for UI-01 lands in phase 9.
+
+## Phase 3
+
+**`pino-pretty` is on by default** (`LOG_PRETTY=true`). It runs synchronously, so a fatal startup message is printed before the process exits. Redaction and key scrubbing happen inside pino before formatting, and a test checks pretty output for leaked keys too. Set `LOG_PRETTY=false` for raw JSON lines.
+
+**Indicators are series, not single values.** Each function returns one value per candle (null while warming up), so the live snapshot takes the last value and the backtester walks forward through the same arrays. Live and backtest literally share the maths. Too little data gives null ("not available"), never NaN or 0.
+
+**Indicators are checked against independent formulas written in the tests**, not against numbers copied from a website. On Wilder's own RSI dataset our values are 70.46, 66.25, 66.48…. StockCharts' table shows 70.53, 66.32…, because their spreadsheet uses unrounded prices; our textbook Wilder formula gives exactly the library's values on the rounded prices.
+
+**Two library quirks found and handled:**
+- `technicalindicators` reports a MACD signal of exactly 0 as `undefined` (seen on a flat series). We rebuild it as MACD − histogram.
+- ATR follows the convention that true range needs a previous close, so the first ATR appears at candle 14 (index 14), not 13. Our reference test uses the same convention.
+
+**Volume vs 30-day average** is each candle's volume divided by the average of the previous 30 days of candles (2,880 on 15m, 180 on 4h). Momentum can't fire in the first 30 days of history, by design.
+
+**Strategy rules (all thresholds in `config/strategy.json`, with ranges):**
+- *Momentum:* 4h MACD histogram > 0 and 4h close above its 20-period middle band; 15m MACD histogram > 0 and price above its middle band; 15m volume ≥ 1.3× average; RSI < 70. Stop 1.5 ATR, target 2× the stop distance.
+- *Mean reversion:* only when the 15m Bollinger width is ≤ 4% of price (low volatility); price at or below the lower band and RSI ≤ 30. Stop 1 ATR, target the middle band. Its R:R is whatever the band gives; the validator decides if that's enough.
+- *Stat-arb:* rolling z-score of the BTC/ETH price ratio over 96 candles (1 day). At |z| ≥ 2 it buys the cheap side (BTC if z ≤ −2, ETH if z ≥ +2). The target is the price that would put the ratio back at its average with the other leg unchanged. Stop 2 ATR. When |z| ≤ 0.5 it proposes an exit for holdings that stat-arb opened.
+
+**Spot only, enforced in the types.** A candidate's direction can only be `long` or `exit`. Exits come only from stat-arb (momentum and mean reversion exit through their stop/target OCO) and only for assets we actually hold. No new entry is proposed in a pair we already hold.
+
+**Candidate prices are rounded** (2 decimals above 100, 4 below 100, 6 below 1) before reward-to-risk is computed, so the AI in phase 4 copies short, exact numbers. Quantities are rounded down to 6 decimals. A property test also caught a floating-point edge case in that rounding (0.063439 became 0.063438), which is fixed.
+
+**Position size** is the smallest of: 1% risk if the stop is hit, the 25% per-asset limit (minus what we already hold), the 60% total exposure limit, and free cash (spot never borrows). Orders under 10 USDT are skipped with a reason. A new `minOrderUsdt` risk setting holds that minimum.
+
+**The validator's risk rules ship now, ahead of phase 5** (rules 5, 6, 7, 8, 9 and 11: daily loss, trades per day, risk per trade, position and exposure limits including "never borrow", no conflicting position, stop distance and R:R). The backtester calls exactly this function, so BT-01 is real today. Phase 5 adds the live-only rules (schema and grounding, signal and snapshot age, feed health, kill switch, confidence, entry vs current price), and the full VAL test set.
+
+**SNAP-01 to SNAP-03 move to phase 4.** The snapshot is what the analyst sends to the model, so it's built with the analyst. The canonical JSON and SHA-256 helpers it needs already exist.
+
+**Backtester timing has no look-ahead.** Decisions happen at a 15m candle's close, using only closed candles (a 4h candle counts only after its 4 hours end). Orders execute on the next candle. A test proves it: wildly changing all candles after a date leaves every earlier trade identical.
+
+**The simulated exchange is pessimistic on purpose:**
+- A 0.1% fee and slippage (default 5 bps) on every fill, including limits.
+- A limit buy fills only if the price trades *below* it; touching isn't enough.
+- An unfilled entry is cancelled after one candle, like the live 60-second timeout.
+- A gap through a stop fills at the open.
+- If a candle touches both stop and target, the stop wins.
+- On the candle an entry fills, only the stop counts (we can't know whether the high came before our fill).
+
+**Risk controls act in the backtest like they do live.** The daily loss limit blocks entries until UTC midnight. The max drawdown closes everything and stops trading for the rest of the run (live, that's the PIN restart). Both appear under "Risk controls that fired".
+
+**Walk-forward:** the same settings on the first 70% and the last 30%. Nothing is tuned on the first part, so this is an honesty check, not an optimiser. It warns when either part has fewer than 5 trades, when the yearly returns have opposite signs, or when out-of-sample Sharpe is under half of in-sample. If both parts lose money, the page says so in red instead of "they agree".
+
+**Metric conventions:** a year is 365 days (crypto never closes); Sharpe and Sortino use daily returns, risk-free rate 0, sample standard deviation; Sortino's downside deviation is taken over all days; profit factor is empty when there are no losing trades. A hand-calculated fixture pins every number.
+
+**History comes from `data-api.binance.vision`, Binance's market-data-only host** (it has no order or account endpoints at all). `HISTORY_BASE_URL` is checked against that one host. The download stores 15m and 1h CSVs. 4h candles are rolled up from 1h, keeping only complete 4-hour buckets. The download resumes after an interruption (each page is appended as it arrives). It survives a crash mid-line (a test found and fixed a bug where the next row was glued onto a broken line). It retries HTTP 429/5xx with backoff, and reports gaps.
+
+**Backtests run in a worker thread,** so a two-year run (about 4–5 s for three pairs plus the walk-forward) never blocks the API. In my run `/health` answered in 2 ms during a backtest. That matters because the kill switch will live on the API. One run at a time (409 otherwise). A run left "running" by a crash is marked failed when the API restarts.
+
+**Parameter overrides in the Backtest Lab must stay inside each setting's approved range,** the same rule the Strategy and Risk page will use. The API refuses anything else with the reason.
+
+**Charts use Recharts** (listed in the stack). Their animation is turned off when the viewer prefers reduced motion. Equity and buy-and-hold share one chart; comparisons plot each run as % change from its own start, so runs over different periods still line up.
+
+**Phase 3 test IDs:** IND-01 to IND-06, STR-01 to STR-07, BT-01 to BT-10 (all), plus API-02/API-03 for the backtest endpoints, UI-11 display logic, and backtest checks of RISK-03 and RISK-06 behaviour. The full RISK set comes with the risk process in phase 7.
+
+**Screenshots of the Lab were made with a seeded random-walk market**, because exchange hosts are blocked from my workspace. On a random walk no strategy has an edge, so all three lose about 15% after costs and hit the drawdown stop while BTC buy-and-hold is up. That's the correct, honest outcome. Run `npm run candles:download` for real data.

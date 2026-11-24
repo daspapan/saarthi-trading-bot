@@ -5,6 +5,7 @@
 //    request details back in errors).
 
 import pino, { type DestinationStream, type Logger } from "pino";
+import pretty from "pino-pretty";
 
 const REDACT_PATHS = [
   "apiKey",
@@ -59,7 +60,18 @@ export type LoggerOptions = {
   secrets?: readonly string[];
   /** For tests: write to this stream instead of stdout. */
   destination?: DestinationStream;
+  /**
+   * Human-readable coloured output (pino-pretty) instead of JSON lines.
+   * Defaults to LOG_PRETTY=true. Redaction and scrubbing happen BEFORE
+   * formatting, so pretty logs are just as safe as JSON logs.
+   */
+  pretty?: boolean;
 };
+
+function prettyStream(): DestinationStream {
+  // sync: true so a fatal startup message is printed before process.exit().
+  return pretty({ colorize: true, sync: true, translateTime: "HH:MM:ss", ignore: "pid,hostname" });
+}
 
 export function createLogger(name: string, opts: LoggerOptions = {}): Logger {
   const secrets = opts.secrets ?? [];
@@ -75,6 +87,6 @@ export function createLogger(name: string, opts: LoggerOptions = {}): Logger {
         },
       },
     },
-    opts.destination,
+    opts.destination ?? ((opts.pretty ?? process.env.LOG_PRETTY === "true") ? prettyStream() : undefined),
   );
 }

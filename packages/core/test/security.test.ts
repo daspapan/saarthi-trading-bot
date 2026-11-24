@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { Writable } from "node:stream";
 import { ConfigError, REDACTED, createLogger, hashPin, loadBaseEnv, resolveBindHost, verifyPin } from "../src/index.ts";
 import { validEnv } from "./helpers.ts";
+import pretty from "pino-pretty";
+
+const prettyTo = (sink: Writable) => pretty({ destination: sink, sync: true, colorize: false });
 
 function captureLogger(secrets: string[]) {
   const lines: string[] = [];
@@ -36,6 +39,27 @@ describe("CFG-06 keys never appear in logs", () => {
     expect(output()).not.toContain(KEY);
     expect(output()).not.toContain(SECRET);
     expect(output()).toContain(REDACTED);
+  });
+});
+
+describe("CFG-06 pretty logs are redacted too", () => {
+  it("CFG-06 pino-pretty output never contains key values or key fields", () => {
+    const KEY = "vmPUZE6mv9SD5VNHk4HlWFsOr6aKE2zvsw0MuIgwCIPy6utIco14y7Ju91duEh8A";
+    const lines: string[] = [];
+    const sink = new Writable({
+      write(chunk, _enc, done) {
+        lines.push(chunk.toString());
+        done();
+      },
+    });
+    // Route pino-pretty's formatted text into our sink.
+    const log = createLogger("test", { secrets: [KEY], destination: prettyTo(sink) });
+    log.error(new Error(`signature failed for ${KEY}`));
+    log.info({ apiKey: KEY }, "placing order");
+    const out = lines.join("");
+    expect(out).toContain("placing order");
+    expect(out).not.toContain(KEY);
+    expect(out).toContain(REDACTED);
   });
 });
 

@@ -8,12 +8,13 @@ Based on the LinkedIn articles "Trading Bot Part 01: What the YouTube video didn
 
 ## Status
 
-Phase 2 of 9 done.
+Phase 3 of 9 done.
 
 - Phase 1: workspace skeleton, config loading, SQLite migrations, testnet-only guard, `/health`, one-command start.
 - Phase 2: two live price feeds (Binance Spot Testnet plus a public cross-check), 1m/15m/4h candles, `price_state` every 5 seconds, the stale and disagreement pause, exchange health checks, gap backfill, and a live health strip with price tiles.
+- Phase 3: indicators (RSI, MACD, Bollinger, ATR, volume vs 30-day average), the three strategies with code-computed candidates and position sizing, the validator's risk rules, a two-year candle download, the backtester (fees, slippage, no look-ahead, buy-and-hold benchmark, walk-forward check) and the Backtest Lab page.
 
-No AI or orders yet.
+No AI or live orders yet.
 
 ## Setup on a Mac
 
@@ -32,6 +33,14 @@ Open http://127.0.0.1:3000. Within a few seconds you should see:
 - three price tiles (BTC, ETH, SOL) with bid, ask, the 24h change and an arrow, feed B's price and the gap between the feeds in bps
 - an amber banner, "New signals paused · resuming in …s", counting down for 60 seconds, then turning green: "Signals allowed"
 - the health strip: Feed A, Feed B and Exchange API, then the five processes, each with an animated arrow and the word UP
+
+### Backtests: download two years of history once
+
+```bash
+npm run candles:download
+```
+
+This fetches 15m and 1h candles for BTC, ETH and SOL from Binance's public market-data host (no keys, read-only) into `data/candles/`. It takes a few minutes. If it's interrupted, run it again: it resumes. Then open http://127.0.0.1:3000/backtest, pick a strategy and dates, and press **Run backtest**.
 
 ### Optional: a PIN (needed for phone access later)
 
@@ -98,6 +107,16 @@ All read-only for now. Errors are `{ "error": "plain-language reason" }`.
 `GET /prices`: `{ "prices": [{ "pair", "bid", "ask", "last", "change24hPct", "volume24h", "checkPrice", "disagreementBps", "updatedAt", "ageSec" }] }`
 
 `GET /candles?pair=BTC/USDT&tf=15m&limit=200`: `{ "pair", "timeframe", "candles": [{ "time", "open", "high", "low", "close", "volume" }] }`, oldest first. `tf` is `1m`, `15m`, `1h` or `4h`; `limit` is 1 to 1000.
+
+`GET /settings`: both config files (`strategy`, `risk`) with each setting's value, allowed range and plain-language help.
+
+`GET /backtests/data`: `{ "pairs", "files": [{ "pair", "timeframe", "candles", "first", "last" }], "range": { "from", "to" } | null, "hint" }`
+
+`POST /backtests` with `{ "strategy": "all" | "statArb" | "momentum" | "meanReversion", "from": ms, "to": ms, "slippageBps": 0-50, "overrides": { "momentum.targetR": 3 }, "label": "optional name" }` returns `202 { "id", "status": "running" }`. Overrides must be inside each setting's allowed range. One run at a time (409 while one is running).
+
+`GET /backtests`: `{ "runs": [{ "id", "label", "strategy", "status", "error", "from", "to", "createdAt", "summary": { "totalReturn", "cagr", "sharpe", "maxDrawdown", "trades", "benchmarkReturn" } }] }`
+
+`GET /backtests/:id`: the run with `metrics`, `curve`, `drawdown`, `benchmark`, `walkForward`, `events`, `rejections`, `costs`, `trades` (latest 500) and `totalTrades`.
 
 ## Safety rules enforced from phase 1
 

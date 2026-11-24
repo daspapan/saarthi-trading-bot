@@ -21,6 +21,7 @@
     "dev:web": "npm run dev --workspace=@saarthi/web",
     "migrate": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/migrate.ts",
     "seed": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/seed.ts",
+    "candles:download": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/download-candles.ts",
     "pin:hash": "node --disable-warning=ExperimentalWarning scripts/pin-hash.ts",
     "test": "vitest run",
     "test:watch": "vitest",
