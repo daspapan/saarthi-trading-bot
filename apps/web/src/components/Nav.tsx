@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const LINKS = [
-  { href: "/", label: "Live" },
+  { href: "/", label: "Cockpit" },
   { href: "/analyst", label: "AI Analyst" },
   { href: "/orders", label: "Orders" },
   { href: "/backtest", label: "Backtest Lab" },
@@ -14,11 +14,11 @@ export function Nav() {
   const path = usePathname();
   return (
     <nav aria-label="Main" className="border-b border-line bg-panel">
-      <div className="mx-auto flex max-w-6xl items-center gap-6 px-4">
+      <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 sm:gap-6">
         <Link href="/" className="py-3 text-xl font-black tracking-tight">
           Saarthi<span className="text-accent">.</span>
         </Link>
-        <ul className="flex gap-1">
+        <ul className="flex gap-1 overflow-x-auto whitespace-nowrap">
           {LINKS.map((l) => {
             const active = l.href === "/" ? path === "/" : path.startsWith(l.href);
             return (

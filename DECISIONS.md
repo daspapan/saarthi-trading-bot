@@ -239,3 +239,33 @@ The validator and "what happened next" boxes are placeholders until phases 5 and
 **One more small change:** the analyst's config loader now checks whether key variables exist with `in`, without reading their values, so the runtime part of EX-19 can prove that only the executor reads them.
 
 **Phase 6 test IDs:** EX-01 to EX-19 (EX-11 is parametrised over every state, including "the exchange call succeeded but the crash came before saving"), PAPER-01 (contract suite) and PAPER-02, TN-01 for the client's URL guard, API tests for `/orders`, `/positions`, `/trades`, and UI-13 display logic for the stepper and P&L wording.
+
+## Phase 7
+
+**The kill switch is a database write.** Pressing it sets three flags (`kill_switch`, `manual_restart`, `liquidate`), discards pending queue items and writes an audit row, in one transaction. Nothing else is needed, so it works with Ollama, the analyst, the feed and the web app stopped (RISK-10). `npm run kill -- <PIN>` does the same from a terminal, so it even works with the API down. The executor checks the `liquidate` flag at the start of every 1-second tick and closes everything; if the executor itself was down, it does this right after reconciling when it starts. A position's OCO stays on the exchange the whole time, so nothing is unprotected while waiting.
+
+**What liquidation does, per order state:** queued or re-checking: cancelled. Entry placed: cancelled on the exchange; anything that filled first is recorded as a position and sold. Waiting for protection: sold. Open: its OCO is cancelled and the coins sold at market, unless the stop or target filled in the same moment, in which case it closes the normal way. Sales go through EMERGENCY_CLOSE, so they retry until they succeed. Any other order still resting on the exchange is cancelled. When nothing is left, the executor clears `liquidate`, audits how many seconds it took and raises a "done" alert. In the tests three positions close in 2 to 3 simulated seconds; the 30-second limit (RISK-09) leaves room for a slow exchange.
+
+**Close reasons** are `kill-switch` and `drawdown` for these sales, so the trade history says why each position was sold.
+
+**Pressing twice is safe** (RISK-11): while `liquidate` is on, a second press only adds an audit row. After everything is closed, pressing again finds nothing to do.
+
+**PIN rules.** `POST /kill` and `/restart` need the PIN when `PIN_HASH` is set. Wrong PINs are audited (`pin_rejected`), and 5 wrong PINs in a minute lock both for the rest of that minute (the terminal command still works). If no PIN is set, the kill switch works without one, because stopping is always the safe direction, but restart is refused until a PIN is set, and the Cockpit says so in amber.
+
+**Restart needs:** the correct PIN, and nothing still being closed. It clears `kill_switch` and `manual_restart` (also after a protection failure, which only sets `kill_switch`). It does not clear the daily loss flag.
+
+**Daily P&L = equity now minus equity at 00:00 UTC.** Equity is USDT plus coins at the last price, recorded by the executor every 10 seconds (up from 30) from the exchange's balances. That one number includes realised P&L, unrealised P&L and every fee already paid (RISK-01). The exit fee on an open position isn't paid yet, so it isn't in equity; the Orders page shows it separately in "if sold now". The Cockpit also shows today's realised, open and fees figures, so the total can be checked.
+
+**Daily limit:** warn once at 80% (`dailyLossWarnPct`), and at 100% set `daily_limit_hit` (the validator's rule 6 already blocks new orders on it), discard pending queue items and alert. Open positions keep their stops: the limit stops new risk, it doesn't sell. The flag's reason starts with the UTC date, and the monitor clears it when the date changes (RISK-04). It only acts on an equity figure from today, so a stale figure from yesterday can't trip today's limit.
+
+**Drawdown** is measured from the high-water mark kept in `equity_snapshots`. At 15% the risk process triggers the same liquidation as the kill switch, with source `drawdown`. It won't trigger again while a manual restart is pending.
+
+**Alerts** have a unique key per event (`stop_hit:12`, `daily_warn:2026-11-24`, `health:executor:<last heartbeat>`), so a condition checked every 5 seconds alerts once (AL-01). Each alert is also an audit row. The dashboard polls `GET /alerts` every 3 seconds and shows new ones as toasts; critical toasts stay until closed. On first load it doesn't replay old alerts.
+
+**ntfy and Telegram** are optional and sent by the risk process in a separate step after its checks, each with a 5-second timeout and one attempt. A failure is logged and stored on the alert, and never affects the checks or the kill switch (AL-02). The Telegram token is scrubbed from logs. These are the only outbound calls that aren't to the exchange or market data, and they carry only the alert text.
+
+**Health alarm:** the executor or the feed going quiet for 15 seconds raises one alert per outage (critical if the executor has orders or positions).
+
+**The Cockpit is now the home page.** The kill switch is a 160 px button you press and hold for two seconds (or hold Space / Enter); a ring fills as you hold, and letting go early cancels. The three gauges (daily loss used, drawdown, exposure) each fill toward their own limit and carry a word (OK, WARNING, LIMIT) as well as a colour. The light theme stays as you asked, instead of the spec's dark default. The full phone layout (bottom navigation, kill switch always reachable) is phase 8; for now the top navigation scrolls sideways on a phone.
+
+**Phase 7 test IDs:** RISK-01 to RISK-12, AL-01, AL-02, INT-06 and INT-09 (kill switch and drawdown with three positions on the paper exchange), API tests for `/kill`, `/restart`, `/risk` and `/alerts`, the terminal kill command, and UI-05 to UI-07 display logic.

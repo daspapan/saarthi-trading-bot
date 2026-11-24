@@ -80,6 +80,9 @@ html {
 /* The price marker on a position glides between stop and target. */
 .progress-marker { transition: left 0.8s ease-out; }
 
+/* Risk gauges fill smoothly. */
+.gauge-arc { transition: stroke-dashoffset 0.8s ease-out, stroke 0.3s; }
+
 /* Respect people who ask for less motion: arrows stand still, no flashing. */
 @media (prefers-reduced-motion: reduce) {
   .arrow-rise, .arrow-sink, .attention, .flash-up, .flash-down, .slide-in, .evidence-tick, .evidence-row, .step-current {
@@ -88,5 +91,5 @@ html {
     transform: none;
   }
   .arrow-rise.delay, .arrow-sink.delay { display: none; }
-  .step-line, .progress-marker { transition: none; }
+  .step-line, .progress-marker, .gauge-arc { transition: none; }
 }

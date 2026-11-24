@@ -16,7 +16,7 @@ describe("DB-01 migrations", () => {
   it("DB-01 run cleanly on an empty database and create every table from the spec", () => {
     const db = openDb(join(mkdtempSync(join(tmpdir(), "saarthi-")), "empty.db"));
     expect(listTables(db)).toEqual([]);
-    expect(migrate(db)).toEqual(["001_init.sql", "002_feeds.sql", "003_backtests.sql", "004_analyst.sql", "005_queue.sql", "006_executor.sql"]);
+    expect(migrate(db)).toEqual(["001_init.sql", "002_feeds.sql", "003_backtests.sql", "004_analyst.sql", "005_queue.sql", "006_executor.sql", "007_risk.sql"]);
     const tables = listTables(db);
     for (const t of SPEC_TABLES) expect(tables).toContain(t);
   });

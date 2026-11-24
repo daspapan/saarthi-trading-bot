@@ -14,11 +14,12 @@
 // switch is set and a critical alert goes out. The emergency sale keeps retrying
 // until it succeeds: it never gives up quietly (EX-09).
 
+import { type AlertLevel, raiseAlert } from "../alerts.ts";
 import { appendAudit } from "../audit.ts";
 import type { SettingsFile } from "../config/settings.ts";
 import { num } from "../config/settings.ts";
 import type { Db } from "../db/db.ts";
-import { setRiskFlag } from "../feed/store.ts";
+import { getRiskFlag, setRiskFlag } from "../feed/store.ts";
 import { discardPending, takeNext } from "../queue.ts";
 import { readLiveState } from "../live.ts";
 import { applyRules, floorToStep, roundToTick } from "../exchange/rules.ts";
@@ -43,7 +44,7 @@ export const MAX_PROTECTION_ATTEMPTS = 2;
 /** Stop-limit leg: the limit sits 0.5% below the stop so it still fills in a fast fall. */
 export const STOP_LIMIT_GAP = 0.005;
 
-export type AlertLevel = "info" | "warn" | "critical";
+export type { AlertLevel };
 
 type Log = { info: (o: object, m?: string) => void; warn: (o: object, m?: string) => void; error: (o: object, m?: string) => void };
 
@@ -78,14 +79,19 @@ export class Executor {
     return this.d.now();
   }
 
-  /** Alerts go into the audit log now; phase 7 turns them into toasts and notifications. */
-  alert(level: AlertLevel, kind: string, message: string, extra: object = {}): void {
-    appendAudit(this.db, "alert", "executor", { level, kind, message, ...extra });
-    this.d.log[level === "info" ? "info" : level === "warn" ? "warn" : "error"]({ kind, ...extra }, message);
+  /**
+   * Raises a toast / notification (and an audit row). The key makes it one alert per
+   * event: by default one per kind per order, so a retried step never repeats it (AL-01).
+   */
+  alert(level: AlertLevel, kind: string, message: string, extra: { orderId?: number; key?: string } = {}): void {
+    const key = extra.key ?? `${kind}:${extra.orderId ?? this.now()}`;
+    const created = raiseAlert(this.db, { level, kind, message, key, orderId: extra.orderId, actor: "executor" }, this.now());
+    if (created) this.d.log[level === "info" ? "info" : level === "warn" ? "warn" : "error"]({ kind, orderId: extra.orderId }, message);
   }
 
-  /** One pass: claim new queue items, then move each unfinished order one step. */
+  /** One pass: close everything if the kill switch asked, claim new queue items, then move each unfinished order one step. */
   async tick(): Promise<void> {
+    if (getRiskFlag(this.db, "liquidate").active) await this.liquidate();
     for (let item = takeNext(this.db, this.now()); item; item = takeNext(this.db, this.now())) {
       createOrderFromQueue(this.db, item, this.now());
     }
@@ -322,7 +328,7 @@ export class Executor {
       if (exiting.n > 0) return o;
       const pos = positionForOrder(this.db, o.id);
       if (!pos || pos.status !== "open") return o;
-      this.alert("warn", "protection_missing", `${o.pair}: the protective OCO was cancelled outside Saarthi. Placing it again.`, { orderId: o.id });
+      this.alert("warn", "protection_missing", `${o.pair}: the protective OCO was cancelled outside Saarthi. Placing it again.`, { orderId: o.id, key: `protection_missing:${o.id}:${ocoGeneration(o.protection_list_id)}` });
       return transition(this.db, o, "PLACE_PROTECTION", "OCO cancelled outside Saarthi: protecting again.", {}, this.now());
     }
 
@@ -351,7 +357,7 @@ export class Executor {
       if (qty < rules.minQty) {
         // Nothing left to sell (e.g. sold by hand): the position is flat.
         const pos = closePosition(this.db, o.pair, o.avg_fill_price ?? 0, 0, 0, this.now());
-        return transition(this.db, o, "CLOSED", "Nothing left to sell: the position is already flat.", { close_reason: "emergency", realised_pnl: pos?.realisedPnl ?? null }, this.now());
+        return transition(this.db, o, "CLOSED", "Nothing left to sell: the position is already flat.", { close_reason: o.close_reason ?? "emergency", realised_pnl: pos?.realisedPnl ?? null }, this.now());
       }
       const sold = await this.ex.createOrder({ pair: o.pair, side: "sell", type: "market", quantity: qty, clientOrderId: emergencyId(o.client_order_id, o.attempts + 1) });
       if (sold.status === "filled") return this.emergencyDone(o, sold);
@@ -360,16 +366,125 @@ export class Executor {
       const attempts = o.attempts + 1;
       const wait = this.d.backoffMs(attempts);
       // Never fails quietly: every failure is a critical alert, and it keeps trying.
-      this.alert("critical", "emergency_close_failed", `${o.pair}: emergency sale attempt ${attempts} failed (${(err as Error).message}). Retrying in ${wait / 1000} s. The position is UNPROTECTED: check the exchange.`, { orderId: o.id });
+      this.alert("critical", "emergency_close_failed", `${o.pair}: emergency sale attempt ${attempts} failed (${(err as Error).message}). Retrying in ${wait / 1000} s. The position is UNPROTECTED: check the exchange.`, { orderId: o.id, key: `emergency_close_failed:${o.id}:${attempts}` });
       return patchOrder(this.db, o, { attempts, next_attempt_at: new Date(this.now() + wait).toISOString(), error: (err as Error).message }, this.now());
     }
   }
 
   private emergencyDone(o: OrderRow, sold: ExOrder): OrderRow {
     const pos = closePosition(this.db, o.pair, sold.avgPrice!, sold.filled, sold.fee, this.now());
-    this.alert("critical", "emergency_closed", `${o.pair}: emergency sale done at ${sold.avgPrice}. P&L after fees: ${(pos?.realisedPnl ?? 0).toFixed(2)} USDT. The kill switch stays on until you restart it.`, { orderId: o.id });
-    return transition(this.db, o, "CLOSED", `Emergency sale: ${sold.filled} at ${sold.avgPrice}.`, {
-      exit_price: sold.avgPrice, exit_fee: sold.fee, close_reason: "emergency", realised_pnl: pos?.realisedPnl ?? null,
+    const reason = o.close_reason ?? "emergency";
+    const pnl = `P&L after fees: ${(pos?.realisedPnl ?? 0).toFixed(2)} USDT.`;
+    if (reason === "emergency") {
+      this.alert("critical", "emergency_closed", `${o.pair}: emergency sale done at ${sold.avgPrice}. ${pnl} The kill switch stays on until you restart it.`, { orderId: o.id });
+    } else {
+      this.alert("warn", "position_closed", `${o.pair} sold at ${sold.avgPrice} (${reason === "drawdown" ? "drawdown limit" : "kill switch"}). ${pnl}`, { orderId: o.id });
+    }
+    return transition(this.db, o, "CLOSED", `${reason === "emergency" ? "Emergency sale" : reason === "drawdown" ? "Sold by the drawdown stop" : "Sold by the kill switch"}: ${sold.filled} at ${sold.avgPrice}.`, {
+      exit_price: sold.avgPrice, exit_fee: sold.fee, close_reason: reason, realised_pnl: pos?.realisedPnl ?? null,
     }, this.now());
+  }
+
+  // ---------- LIQUIDATION: the kill switch and the drawdown stop (RISK-06, RISK-09) ----------
+
+  /**
+   * Cancels every order and sells every position. Runs on each tick while the
+   * "liquidate" flag is on; every action is safe to repeat, so a crash midway just
+   * carries on. Sales go through EMERGENCY_CLOSE, which retries until they succeed.
+   */
+  private async liquidate(): Promise<void> {
+    const source = getRiskFlag(this.db, "liquidate").reason === "drawdown" ? "drawdown" : "kill-switch";
+    const why = source === "drawdown" ? "Drawdown limit" : "Kill switch";
+    for (const o of activeOrders(this.db)) {
+      try {
+        await this.liquidateOrder(o, source, why);
+      } catch (err) {
+        this.d.log.error({ orderId: o.id, err: (err as Error).message }, "Liquidation step failed; retrying next tick.");
+      }
+    }
+    // Anything still resting on the exchange (ours or not) is cancelled too. Emergency market sells fill at once.
+    try {
+      for (const ex of await this.ex.openOrders()) {
+        if (/-e\d+$/.test(ex.clientOrderId)) continue;
+        await this.ex.cancelOrder(ex.pair, ex.clientOrderId).catch(() => {});
+      }
+    } catch (err) {
+      this.d.log.error({ err: (err as Error).message }, "Could not list open orders during liquidation; retrying next tick.");
+    }
+
+    const left = activeOrders(this.db).length;
+    if (left === 0) {
+      const since = (this.db.prepare("SELECT updated_at FROM risk_flags WHERE name = 'liquidate'").get() as { updated_at: string }).updated_at;
+      const secs = Math.max(0, Math.round((this.now() - Date.parse(since)) / 100) / 10);
+      setRiskFlag(this.db, "liquidate", false, null, this.now());
+      appendAudit(this.db, "kill_switch", "executor", { event: "liquidation_done", source, seconds: secs });
+      this.alert("critical", "kill_switch_done", `${why}: every order is cancelled and every position sold (${secs} s). Trading stays stopped until a PIN restart.`, { key: `kill_done:${since}` });
+    }
+  }
+
+  private async liquidateOrder(o: OrderRow, source: string, why: string): Promise<void> {
+    const cancelled = (detail: string) => transition(this.db, o, "CANCELLED", `${why}: ${detail}`, { error: `${why}.` }, this.now());
+    const sell = (cur: OrderRow, detail: string) => transition(this.db, cur, "EMERGENCY_CLOSE", `${why}: ${detail}`, { close_reason: source, attempts: 0 }, this.now());
+
+    switch (o.state) {
+      case "QUEUED":
+      case "PRECHECK":
+        cancelled("cancelled before anything was placed.");
+        return;
+      case "PLACE_ENTRY":
+      case "CONFIRM_FILL": {
+        if (o.direction === "exit" && o.state === "CONFIRM_FILL") return; // already selling: let it finish
+        let ex = await this.ex.getOrder(o.pair, o.client_order_id);
+        if (ex?.status === "open") {
+          await this.ex.cancelOrder(o.pair, o.client_order_id);
+          ex = await this.ex.getOrder(o.pair, o.client_order_id);
+        }
+        if (!ex || ex.filled <= 0) {
+          cancelled("the entry order was cancelled.");
+          return;
+        }
+        // Part or all of it filled before the cancel: record the position, then sell it.
+        if (o.direction === "exit") {
+          await this.onFilled(o, ex);
+          return;
+        }
+        const filled = await this.onFilled(o, ex);
+        sell(filled, `selling the ${ex.filled} that filled.`);
+        return;
+      }
+      case "PLACE_PROTECTION":
+        await this.cancelProtection(o);
+        sell(o, "selling at market instead of protecting.");
+        return;
+      case "OPEN": {
+        await this.cancelProtection(o);
+        // If the stop or target filled just before we cancelled, close it the normal way.
+        const oco = o.protection_list_id ? await this.ex.getOco(o.pair, o.protection_list_id) : null;
+        if (oco && (oco.stop.status === "filled" || oco.takeProfit.status === "filled")) {
+          await this.watchOpen(o);
+          return;
+        }
+        sell(o, "cancelled the stop and target; selling at market.");
+        return;
+      }
+      default:
+        return; // EMERGENCY_CLOSE carries on in step()
+    }
+  }
+
+  /** Cancels this order's OCO (the current one, and a newer one a crash may have left unrecorded). */
+  private async cancelProtection(o: OrderRow): Promise<void> {
+    const ids = new Set([o.protection_list_id, ocoIds(o.client_order_id, ocoGeneration(o.protection_list_id) + 1).list].filter((x): x is string => !!x));
+    for (const id of ids) {
+      const oco = await this.ex.getOco(o.pair, id);
+      if (oco?.status === "open") {
+        try {
+          await this.ex.cancelOco(o.pair, id);
+        } catch (err) {
+          // It may have filled in between: the caller re-reads it.
+          if (!(err instanceof ExchangeError && err.kind === "not_found")) throw err;
+        }
+      }
+    }
   }
 }

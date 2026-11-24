@@ -8,7 +8,7 @@ Based on the LinkedIn articles "Trading Bot Part 01: What the YouTube video didn
 
 ## Status
 
-Phase 6 of 9 done.
+Phase 7 of 9 done.
 
 - Phase 1: workspace skeleton, config loading, SQLite migrations, testnet-only guard, `/health`, one-command start.
 - Phase 2: two live price feeds (Binance Spot Testnet plus a public cross-check), 1m/15m/4h candles, `price_state` every 5 seconds, the stale and disagreement pause, exchange health checks, gap backfill, and a live health strip with price tiles.
@@ -20,7 +20,9 @@ Phase 6 of 9 done.
 
 - Phase 6: the executor. One state machine (queued, re-check, place, wait for fill, place stop and target, open, closed) saved after every step, crash recovery and reconciliation on start, a simulated paper exchange and a Binance Spot Testnet client behind the same interface, and the Orders page.
 
-Trading defaults to paper mode. The risk monitor and kill switch come next.
+- Phase 7: the risk monitor (daily loss limit with an 80% warning, drawdown stop, health alarms), the kill switch (hold-to-confirm button, `POST /kill`, and `npm run kill` for when the API is down), alerts as toasts plus optional ntfy / Telegram, and the Cockpit page.
+
+Trading defaults to paper mode.
 
 ## Setup on a Mac
 
@@ -77,6 +79,20 @@ The executor refuses to start in testnet mode without keys, and the client refus
 ```bash
 SAARTHI_TESTNET_CONTRACT=1 node --env-file=.env.local node_modules/.bin/vitest run apps/executor/test/contract.test.ts
 ```
+
+### The kill switch
+
+On the Cockpit page: enter the PIN, then press and hold the red button for two seconds. Or from any terminal in the project folder, even with the API and web app stopped:
+
+```bash
+npm run kill -- <PIN>
+```
+
+Either way the executor cancels every order and sells every position within seconds, and trading stays stopped until you enter the PIN under "Restart trading". If no PIN is set, the kill switch works without one but restart is refused until you set `PIN_HASH`.
+
+### Alerts on your phone (optional)
+
+Alerts always show as toasts on the dashboard (and as browser notifications once you click "Enable browser notifications"). To get them on your phone too, set `NTFY_URL` (install the ntfy app and subscribe to a long random topic) and/or `TELEGRAM_BOT_TOKEN` plus `TELEGRAM_CHAT_ID` in `.env`. If sending fails, it is logged and trading carries on.
 
 ### Optional: a PIN (needed for phone access later)
 
@@ -163,6 +179,14 @@ The analyst's token (in `data/analyst.token`, created by the API) may read anyth
 `GET /positions`: open positions, `{ positions: [{ id, pair, quantity, avgEntry, stopPrice, targetPrice, lastPrice, feesPaid, unrealisedPnl, unrealisedPct, progress, openedAt }] }`. `unrealisedPnl` is what selling at the last price would leave after the entry fee and an estimated 0.1% exit fee. `progress` is 0 at the stop and 1 at the target.
 
 `GET /trades?limit=50`: closed trades, `{ trades: [{ orderId, pair, quantity, entryPrice, exitPrice, entryFee, exitFee, realisedPnl, closeReason, openedAt, closedAt }], totals: { count, wins, realisedPnl, fees } }`. All P&L is after fees. `realisedPnl` is `null` for a position that was closed outside Saarthi (testnet reset), because the exit price is unknown.
+
+`GET /risk`: `{ equity, cash, dayStartEquity, highWaterMark, equityAt, equityAgeSec, assessment: { dailyPnl, dailyPnlPct, dailyLossLimit, dailyUsedPct, warn, limitHit, drawdownPct, drawdownLimitPct, drawdownHit } | null, breakdown: { realisedToday, unrealised, feesToday }, exposure: { total, pct, limitPct, byPair: [{ pair, value, pct, limitPct }] }, limits, flags: { killSwitch, manualRestart, dailyLimitHit, liquidating: { active, since, ordersLeft } }, pinRequired }`. Today's P&L is equity now minus equity at 00:00 UTC, so it includes realised and unrealised P&L and every fee paid.
+
+`POST /kill` with `{ "pin": "1234" }`: `202 { alreadyActive, discarded, message }`. A wrong PIN is `403` and audited; after 5 wrong PINs in a minute, `429`. Pressing twice is safe.
+
+`POST /restart` with `{ "pin": "1234" }`: `200` once everything is closed; `409` while positions are still being sold or when trading isn't stopped; `403` for a wrong PIN. It does not clear the daily loss limit, which resets at 00:00 UTC.
+
+`GET /alerts?after=<id>&limit=50`: `{ latestId, alerts: [{ id, level: "info" | "warn" | "critical", kind, message, orderId, createdAt }] }`. With `after`, oldest first; without, newest first.
 
 `GET /settings`: both config files (`strategy`, `risk`) with each setting's value, allowed range and plain-language help.
 

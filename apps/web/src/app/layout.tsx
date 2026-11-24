@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { AlertToaster } from "@/components/AlertToaster";
 import { Nav } from "@/components/Nav";
 
 export const metadata: Metadata = {
@@ -24,6 +25,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         </div>
         <Nav />
         {children}
+        <AlertToaster />
       </body>
     </html>
   );

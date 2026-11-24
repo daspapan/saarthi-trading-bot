@@ -3,14 +3,14 @@
 // On start it reconciles with the exchange, then every second it:
 //   1. lets the paper exchange match orders (paper mode only)
 //   2. moves each order one step through the state machine
-// and every 30 seconds records equity from real balances.
+// and every 10 seconds records equity from real balances (the risk monitor reads it).
 
 import { Executor, PaperExchange, loadBaseEnv, loadSettingsFile, reconcile, recordEquity, runWorker } from "@saarthi/core";
 import { createExchangeClient, priceFromDb } from "./client.ts";
 import { loadExchangeKeys, secretValues } from "./secrets.ts";
 
 const TICK_MS = 1_000;
-const EQUITY_EVERY_MS = 30_000;
+const EQUITY_EVERY_MS = 10_000; // the risk monitor checks the daily loss and drawdown against this
 
 const keys = loadExchangeKeys();
 

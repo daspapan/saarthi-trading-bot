@@ -17,6 +17,13 @@ import {
   createRunRecord,
   ensureAnalystToken,
   failStaleRuns,
+  appendAudit,
+  latestAlertId,
+  listAlerts,
+  readRiskView,
+  restartTrading,
+  triggerLiquidation,
+  verifyPin,
   ingestAnalysis,
   listQueue,
   listSignalCards,
@@ -182,6 +189,63 @@ export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string } 
       risk: loadSettingsFile(env.configDir, "risk.json"),
       strategies: STRATEGIES.map((id) => ({ id, label: STRATEGY_LABELS[id] })),
     });
+  });
+
+  // ---------- risk, kill switch, alerts (phase 7) ----------
+
+  // Wrong PINs: at most 5 per minute, then a short lockout. Every wrong PIN is audited (RISK-08).
+  const pinFailures: number[] = [];
+  const pinLocked = () => {
+    const cutoff = Date.now() - 60_000;
+    while (pinFailures.length && pinFailures[0]! < cutoff) pinFailures.shift();
+    return pinFailures.length >= 5;
+  };
+
+  app.get("/risk", (_req, res) => {
+    const view = readRiskView(db, loadSettingsFile(env.configDir, "risk.json"));
+    res.json({ ...view, pinRequired: env.pinHash !== null });
+  });
+
+  app.post("/kill", (req, res) => {
+    const pin = typeof req.body?.pin === "string" ? req.body.pin : undefined;
+    if (env.pinHash) {
+      if (pinLocked()) {
+        res.status(429).json({ error: "Too many wrong PINs. Wait a minute, or run `npm run kill -- <PIN>` in a terminal." });
+        return;
+      }
+      if (!pin || !verifyPin(pin, env.pinHash)) {
+        pinFailures.push(Date.now());
+        appendAudit(db, "pin_rejected", "operator", { action: "kill", ip: req.ip });
+        res.status(403).json({ error: "Wrong PIN. Nothing was changed." });
+        return;
+      }
+    }
+    const r = triggerLiquidation(db, { source: "kill-switch", reason: "Pressed on the dashboard.", actor: "operator" });
+    res.status(202).json({
+      ...r,
+      message: r.alreadyActive ? "Already closing everything." : "Kill switch on. Every order is being cancelled and every position sold.",
+    });
+  });
+
+  app.post("/restart", (req, res) => {
+    if (pinLocked()) {
+      res.status(429).json({ error: "Too many wrong PINs. Wait a minute." });
+      return;
+    }
+    const pin = typeof req.body?.pin === "string" ? req.body.pin : undefined;
+    const r = restartTrading(db, pin, env.pinHash, "operator");
+    if (!r.ok) {
+      if (r.status === 403) pinFailures.push(Date.now());
+      res.status(r.status).json({ error: r.error });
+      return;
+    }
+    res.json({ ok: true, message: "Trading restarted." });
+  });
+
+  app.get("/alerts", (req, res) => {
+    const after = req.query.after === undefined ? undefined : Number(req.query.after);
+    const limit = Number(req.query.limit ?? 50) || 50;
+    res.json({ latestId: latestAlertId(db), alerts: listAlerts(db, { afterId: Number.isFinite(after) ? after : undefined, limit }) });
   });
 
   // ---------- backtests ----------
