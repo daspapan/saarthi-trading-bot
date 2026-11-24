@@ -7,7 +7,7 @@
 // There is no short selling, no margin and no borrowing.
 
 import { type SettingsFile, num } from "./config/settings.ts";
-import { roundPrice } from "./feed/monitor.ts";
+import { roundNum, roundPrice } from "./feed/monitor.ts";
 import type { IndicatorSet, Series } from "./indicators.ts";
 import { type Account, type RiskLimits, sizePosition } from "./risk.ts";
 
@@ -150,7 +150,7 @@ export function momentumSetup(m: PairMarket, s: SettingsFile): Setup | null {
       { name: `${m.pair} price`, value: entry },
       { name: `${m.pair} 15m RSI`, value: r2(a.rsi) },
       { name: `${m.pair} 15m volume vs 30d avg`, value: r2(a.volumeRatio) },
-      { name: `${m.pair} 4h MACD histogram`, value: r2(b.macd.histogram) },
+      { name: `${m.pair} 4h MACD histogram`, value: roundNum(b.macd.histogram) },
       { name: `${m.pair} 15m ATR`, value: roundPrice(a.atr) },
     ],
   };

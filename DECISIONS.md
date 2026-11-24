@@ -134,3 +134,48 @@ Where the prompt left room, I picked the simpler option and wrote it down here.
 **Phase 3 test IDs:** IND-01 to IND-06, STR-01 to STR-07, BT-01 to BT-10 (all), plus API-02/API-03 for the backtest endpoints, UI-11 display logic, and backtest checks of RISK-03 and RISK-06 behaviour. The full RISK set comes with the risk process in phase 7.
 
 **Screenshots of the Lab were made with a seeded random-walk market**, because exchange hosts are blocked from my workspace. On a random walk no strategy has an edge, so all three lose about 15% after costs and hit the drawdown stop while BTC buy-and-hold is up. That's the correct, honest outcome. Run `npm run candles:download` for real data.
+
+## Phase 4
+
+**The analyst's only way in is `POST /signals`.** The analyst process:
+- refuses to start if any exchange key is visible
+- opens the database **read-only** (SQLite enforces it; a test proves a write fails)
+- sends its heartbeat and its results through the API
+
+The API, not the analyst, runs the guardrails and stores everything, as in the Part 02 diagram.
+
+**The analyst's token** is created by the API on first start (`data/analyst.token`, random, file mode 600, gitignored) and read by the analyst. Nothing to configure. The API lets that token read anything and do exactly two writes: `POST /signals` and `POST /signals/heartbeat` (CFG-09). Every other write with it gets 403, and nobody else can submit signals (401). The heartbeat route is part of the `/signals` family because the analyst can't write its own heartbeat to a read-only database.
+
+**"Analyse now"** inserts a row in `analysis_requests`. The analyst polls it every 2 s (a read) and runs once per new row. A press that arrives during a run waits for the next poll instead of being lost. Requests from before the analyst started are ignored.
+
+**The snapshot carries a flat list of FACTS** (`{name, value}`): prices, 15m and 4h indicators, the BTC/ETH ratio, the account, today's numbers, and every candidate's entry, stop, target, R:R, size and risk. The model may cite only these, by exact name and value. Every value is rounded once, by one shared function, so the strategies and the snapshot can't disagree. That was a real bug found here: SOL's 4h MACD histogram was rounded two ways. A test now builds a snapshot at 160+ points of the synthetic history to keep it fixed. Only closed candles go into the snapshot; the one still forming is left out.
+
+**The hash** is SHA-256 of canonical JSON (keys sorted). The API re-computes it and refuses a snapshot whose contents don't match.
+
+**Model output and retries.** The model must return `{ "signals": [...] }`, one per pair, under Ollama's JSON-schema `format`, temperature 0, seed 42, no streaming. "Invalid output" (retried once, then fail closed) means *unusable*: not JSON, or no `signals` list. A usable answer with a bad individual signal isn't retried; that signal is rejected by the guardrails and stored with its reasons, which is more useful to see than a silent retry.
+
+**Fail closed.** Two timeouts (60 s each, our own timer so tests can control it) or two unusable answers store a neutral signal for every pair with "AI unavailable: …". When the feeds aren't trusted, the model isn't called at all: a neutral "skipped: data not trusted (reason)" is stored.
+
+**Grounding rules for numbers in text** (trigger, invalidation, rationale):
+- **What counts as a number:** what a reader would read as a figure ("97,412.03", "$1,250", "-0.92%", "1.8x"). Labels glued to letters ("15m", "4h", "2R") and compound words ("30-day") are skipped.
+- **What matches:** a figure matches if it's a snapshot value shown with the same or fewer decimals ("97,412" for 97412.03). The sign may be dropped ("down 0.92%").
+- **Changed candidate levels:** a figure within 2% of the chosen candidate's entry, stop or target that isn't exact gets its own message ("changes the candidate's stop: 96,500 instead of 96796.28").
+- **Cited data points** must match exactly.
+
+**Injection screen** (all text anywhere in a signal, including data point names): "ignore/disregard/forget/override … previous/your…", "execute", "buy/sell all/everything", URLs and bare domains, code (code fences, `<script>`, `function(`, `=>`, `fetch(`, braces), and role-play phrases. `<` and `>` are allowed, because "RSI < 70" is normal. This errs on the strict side: a false alarm turns a signal neutral, which is the safe direction.
+
+**Outside text** (optional news headlines) comes from `data/headlines.txt`, one per line (gitignored; the phase 9 demo control writes it). It only ever appears between `<<<UNTRUSTED_DATA_START>>>` and `<<<UNTRUSTED_DATA_END>>>` in the user message, never in the system rules. The markers are scrubbed from inside it, so a headline can't close the fence early. Each headline is limited to 200 characters, with at most 10 headlines.
+
+**Every signal is stored, passed or rejected,** with the model's raw output, the run ID, model, latency and trigger. One audit row is written per signal in the same transaction (the audit writer joins an open transaction instead of failing; `BEGIN IMMEDIATE` keeps the hash chain safe). Signals for unknown pairs and duplicates are stored as rejected too.
+
+**The AI Analyst page** groups signals by run. Each card shows:
+- what the AI said
+- the candidate it chose, with the numbers labelled "computed by code, not the AI"
+- the evidence table ("AI said" vs "snapshot", ticking in row by row)
+- the guardrail verdict with every reason
+
+The validator and "what happened next" boxes are placeholders until phases 5 and 6. A link on each run opens the exact snapshot the AI saw.
+
+**Not done here:** the AI evaluations against the real model (AI-01 to AI-07, 5 runs each) are phase 9 as the spec says. I verified the full path with a scripted stand-in for Ollama, because Ollama can't run in my workspace. Your first "Analyse now" with `qwen2.5:7b` is the real test, and the guardrails will show exactly what, if anything, the model gets wrong.
+
+**Phase 4 test IDs:** SNAP-01 to SNAP-03, AN-01 to AN-07, GR-01 to GR-11, CFG-09, plus API-02/API-03 for the new endpoints, AUD-01 for signal audit rows, and UI-02/03/07 display logic.

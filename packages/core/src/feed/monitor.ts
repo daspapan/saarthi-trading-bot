@@ -51,6 +51,16 @@ export function disagreementBps(a: number, b: number): number {
   return (Math.abs(a - b) / ((a + b) / 2)) * 10_000;
 }
 
+/**
+ * Rounds any indicator value by size, keeping the sign: 2 decimals at 100 and
+ * above, 4 below 100, 6 below 1. The strategies and the snapshot both use this,
+ * so the same fact always has exactly the same value everywhere.
+ */
+export function roundNum(x: number): number {
+  const a = Math.abs(x);
+  return Number(x.toFixed(a >= 100 ? 2 : a >= 1 ? 4 : 6));
+}
+
 /** Short, readable price for messages: 97412.03 rather than 97412.03476505345. */
 export function roundPrice(p: number): number {
   return Number(p.toFixed(p >= 100 ? 2 : p >= 1 ? 4 : 6));

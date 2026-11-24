@@ -26,7 +26,10 @@ export function appendAudit(db: Db, eventType: string, actor: string, payload: u
   const createdAt = nowIso();
   // BEGIN IMMEDIATE takes the write lock before reading the last hash, so two
   // processes writing at once can't both chain onto the same previous row.
-  db.exec("BEGIN IMMEDIATE");
+  // If the caller already holds a transaction (it must have started it with
+  // BEGIN IMMEDIATE), we simply join it and the caller commits.
+  const ownTransaction = !(db as unknown as { isTransaction: boolean }).isTransaction;
+  if (ownTransaction) db.exec("BEGIN IMMEDIATE");
   try {
     const last = db.prepare("SELECT hash FROM audit_log ORDER BY id DESC LIMIT 1").get() as { hash: string } | undefined;
     const prevHash = last?.hash ?? GENESIS_HASH;
@@ -36,10 +39,10 @@ export function appendAudit(db: Db, eventType: string, actor: string, payload: u
         "INSERT INTO audit_log (event_type, actor, payload_json, created_at, prev_hash, hash) VALUES (?, ?, ?, ?, ?, ?)",
       )
       .run(eventType, actor, payloadJson, createdAt, prevHash, hash);
-    db.exec("COMMIT");
+    if (ownTransaction) db.exec("COMMIT");
     return { id: Number(info.lastInsertRowid), event_type: eventType, actor, payload_json: payloadJson, created_at: createdAt, prev_hash: prevHash, hash };
   } catch (err) {
-    db.exec("ROLLBACK");
+    if (ownTransaction) db.exec("ROLLBACK");
     throw err;
   }
 }

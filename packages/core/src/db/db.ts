@@ -10,7 +10,16 @@ export type Db = DatabaseSync;
 
 const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
 
-export function openDb(path: string): Db {
+/**
+ * Opens the database. `readOnly: true` gives a connection that physically
+ * cannot write: the analyst uses it, so the AI side can only read data.
+ */
+export function openDb(path: string, opts: { readOnly?: boolean } = {}): Db {
+  if (opts.readOnly) {
+    const ro = new DatabaseSync(path, { readOnly: true });
+    ro.exec("PRAGMA busy_timeout = 5000;");
+    return ro;
+  }
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL;");

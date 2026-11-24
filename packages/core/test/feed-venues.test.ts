@@ -98,3 +98,17 @@ describe("FEED-03 health alarms go into the hash-chained audit log", () => {
     expect(canonicalJson({ b: { d: 1, c: [3, { f: 1, e: 2 }] }, a: null })).toBe('{"a":null,"b":{"c":[3,{"e":2,"f":1}],"d":1}}');
   });
 });
+
+describe("AUD-01 audit rows inside a larger transaction", () => {
+  it("AUD-01 appendAudit joins an open transaction, and a rollback removes its row too", () => {
+    const { db } = tempDb();
+    db.exec("BEGIN IMMEDIATE");
+    appendAudit(db, "signal", "analyst", { n: 1 });
+    db.exec("ROLLBACK");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM audit_log").get()).toEqual({ n: 0 });
+    db.exec("BEGIN IMMEDIATE");
+    appendAudit(db, "signal", "analyst", { n: 2 });
+    db.exec("COMMIT");
+    expect(db.prepare("SELECT COUNT(*) AS n FROM audit_log").get()).toEqual({ n: 1 });
+  });
+});

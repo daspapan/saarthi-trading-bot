@@ -63,9 +63,19 @@ html {
 .flash-up { animation: flash-up 0.9s ease-out; }
 .flash-down { animation: flash-down 0.9s ease-out; }
 
+/* New signal cards slide in. */
+@keyframes slide-in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+.slide-in { animation: slide-in 0.45s ease-out both; }
+
+/* Evidence rows: each tick fades in and pulses once, one row after another. */
+@keyframes tick-in { 0% { opacity: 0; transform: scale(0.6); } 60% { opacity: 1; transform: scale(1.15); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes row-in { from { background: rgb(4 120 87 / 0.12); } to { background: transparent; } }
+.evidence-tick { animation: tick-in 0.4s ease-out both; }
+.evidence-row { animation: row-in 1.2s ease-out both; }
+
 /* Respect people who ask for less motion: arrows stand still, no flashing. */
 @media (prefers-reduced-motion: reduce) {
-  .arrow-rise, .arrow-sink, .attention, .flash-up, .flash-down {
+  .arrow-rise, .arrow-sink, .attention, .flash-up, .flash-down, .slide-in, .evidence-tick, .evidence-row {
     animation: none;
     opacity: 1;
     transform: none;

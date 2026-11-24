@@ -12,8 +12,16 @@ import {
   STRATEGY_LABELS,
   TIMEFRAMES,
   type Timeframe,
+  analystTokenPath,
+  beat,
   createRunRecord,
+  ensureAnalystToken,
   failStaleRuns,
+  ingestAnalysis,
+  listSignalCards,
+  loadSnapshot,
+  requestAnalysis,
+  tokensEqual,
   getRun,
   listRuns,
   listTables,
@@ -25,10 +33,38 @@ import { readCandleFiles, readCandles, readExchange, readFeeds, readPrices } fro
 
 const PAIR_PATTERN = /^[A-Z0-9]{2,10}\/[A-Z0-9]{2,10}$/;
 
-export function createApp(db: Db, env: BaseEnv) {
+/** The only writes the analyst's token may make (CFG-09). Everything else it tries gets a 403. */
+const ANALYST_WRITES = new Set(["POST /signals", "POST /signals/heartbeat"]);
+
+export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string } = {}) {
   const app = express();
   app.disable("x-powered-by");
-  app.use(express.json({ limit: "64kb" }));
+  app.use(express.json({ limit: "512kb" })); // a snapshot plus the model's raw answer
+
+  const analystToken = opts.analystToken ?? ensureAnalystToken(analystTokenPath(env.dbPath));
+
+  // Who is calling? The analyst proves itself with its token. It may read anything
+  // and submit signals, nothing else. Nobody else may submit signals.
+  app.use((req, res, next) => {
+    const auth = req.get("authorization");
+    const bearer = auth?.startsWith("Bearer ") ? auth.slice(7).trim() : null;
+    const isAnalyst = bearer !== null && tokensEqual(bearer, analystToken);
+    if (bearer !== null && !isAnalyst) {
+      res.status(401).json({ error: "Unknown token." });
+      return;
+    }
+    const key = `${req.method} ${req.path}`;
+    const isRead = req.method === "GET" || req.method === "HEAD";
+    if (isAnalyst && !isRead && !ANALYST_WRITES.has(key)) {
+      res.status(403).json({ error: "The analyst token can only submit signals." });
+      return;
+    }
+    if (!isAnalyst && ANALYST_WRITES.has(key)) {
+      res.status(401).json({ error: "Only the analyst process can submit signals." });
+      return;
+    }
+    next();
+  });
 
   app.get("/health", (_req, res) => {
     let dbStatus: "ok" | "error" = "ok";
@@ -72,6 +108,48 @@ export function createApp(db: Db, env: BaseEnv) {
       return;
     }
     res.json({ pair, timeframe, candles: readCandles(db, pair, timeframe as Timeframe, limit) });
+  });
+
+  // ---------- AI analyst ----------
+
+  app.post("/signals", (req, res) => {
+    const result = ingestAnalysis(db, req.body);
+    if (!result.ok) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+    res.status(201).json(result);
+  });
+
+  app.post("/signals/heartbeat", (req, res) => {
+    const detail = typeof req.body?.detail === "string" ? req.body.detail.slice(0, 300) : null;
+    beat(db, "analyst", detail);
+    res.json({ ok: true });
+  });
+
+  app.get("/signals", (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 60) || 60));
+    res.json({ signals: listSignalCards(db, limit) });
+  });
+
+  app.get("/snapshots/:hash", (req, res) => {
+    const snap = /^[0-9a-f]{64}$/.test(req.params.hash) ? loadSnapshot(db, req.params.hash) : null;
+    if (!snap) {
+      res.status(404).json({ error: "No snapshot with that hash." });
+      return;
+    }
+    res.json(snap);
+  });
+
+  // "Analyse now": queue a request; the analyst process picks it up within ~2 seconds.
+  app.post("/analyse", (_req, res) => {
+    const analyst = readProcessStatus(db).find((p) => p.name === "analyst");
+    const requestId = requestAnalysis(db);
+    res.status(202).json({
+      requestId,
+      analystRunning: analyst?.status === "up",
+      message: analyst?.status === "up" ? "Analysis requested." : "Queued, but the analyst process is not running.",
+    });
   });
 
   // ---------- settings (read-only here; editing with a PIN comes in phase 8) ----------

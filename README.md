@@ -8,13 +8,15 @@ Based on the LinkedIn articles "Trading Bot Part 01: What the YouTube video didn
 
 ## Status
 
-Phase 3 of 9 done.
+Phase 4 of 9 done.
 
 - Phase 1: workspace skeleton, config loading, SQLite migrations, testnet-only guard, `/health`, one-command start.
 - Phase 2: two live price feeds (Binance Spot Testnet plus a public cross-check), 1m/15m/4h candles, `price_state` every 5 seconds, the stale and disagreement pause, exchange health checks, gap backfill, and a live health strip with price tiles.
 - Phase 3: indicators (RSI, MACD, Bollinger, ATR, volume vs 30-day average), the three strategies with code-computed candidates and position sizing, the validator's risk rules, a two-year candle download, the backtester (fees, slippage, no look-ahead, buy-and-hold benchmark, walk-forward check) and the Backtest Lab page.
 
-No AI or live orders yet.
+- Phase 4: the AI analyst (Ollama) with snapshots, a prompt that fences outside text, retries and fail-closed, the guardrails (schema, grounding of every cited number, injection screen) and the AI Analyst page.
+
+No orders yet: the validator and order queue come next.
 
 ## Setup on a Mac
 
@@ -41,6 +43,16 @@ npm run candles:download
 ```
 
 This fetches 15m and 1h candles for BTC, ETH and SOL from Binance's public market-data host (no keys, read-only) into `data/candles/`. It takes a few minutes. If it's interrupted, run it again: it resumes. Then open http://127.0.0.1:3000/backtest, pick a strategy and dates, and press **Run backtest**.
+
+### The AI analyst: install Ollama and pull the model once
+
+```bash
+brew install ollama        # or download it from ollama.com
+ollama serve               # leave running (the Ollama app does this for you)
+ollama pull qwen2.5:7b     # about 4.7 GB
+```
+
+Then open http://127.0.0.1:3000/analyst and press **Analyse now**. The analyst also runs by itself every 15 minutes (`ANALYSIS_INTERVAL_MIN`). While the price feeds are paused it records "skipped: data not trusted" instead of calling the model.
 
 ### Optional: a PIN (needed for phone access later)
 
@@ -107,6 +119,16 @@ All read-only for now. Errors are `{ "error": "plain-language reason" }`.
 `GET /prices`: `{ "prices": [{ "pair", "bid", "ask", "last", "change24hPct", "volume24h", "checkPrice", "disagreementBps", "updatedAt", "ageSec" }] }`
 
 `GET /candles?pair=BTC/USDT&tf=15m&limit=200`: `{ "pair", "timeframe", "candles": [{ "time", "open", "high", "low", "close", "volume" }] }`, oldest first. `tf` is `1m`, `15m`, `1h` or `4h`; `limit` is 1 to 1000.
+
+`POST /signals` (analyst token only): the analyst's run: `{ runId, trigger, snapshot, snapshotHash, source: "ollama" | "fail-closed" | "skipped", output, rawText, note, model, latencyMs, attempts }`. The API checks the hash, runs the guardrails on every signal, and stores everything (rejections included). Returns `201 { runId, snapshotHash, signals: [{ id, pair, direction, passed, reasons }] }`.
+
+`GET /signals?limit=60`: newest first. Each card has `pair`, `direction`, `confidence`, `source`, `note`, `model`, `latencyMs`, `rationale`, `triggerText`, `invalidation`, `candidate` (from the snapshot), `evidence: [{ name, aiValue, snapshotValue, match }]` and `guardrails: { passed, reasons }`.
+
+`GET /snapshots/:hash`: exactly what the AI saw for that run.
+
+`POST /analyse`: "Analyse now". Returns `202 { requestId, analystRunning, message }`.
+
+The analyst's token (in `data/analyst.token`, created by the API) may read anything but write only to `/signals` and `/signals/heartbeat`; anything else gets 403.
 
 `GET /settings`: both config files (`strategy`, `risk`) with each setting's value, allowed range and plain-language help.
 
