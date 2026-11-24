@@ -1,0 +1,14 @@
+node_modules/
+.next/
+coverage/
+*.tsbuildinfo
+
+# Secrets and local settings. Never commit these.
+.env
+.env.local
+
+# Runtime data
+data/*.db
+data/*.db-*
+data/candles/*.csv
+.DS_Store

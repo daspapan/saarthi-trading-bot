@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+/* Saarthi light theme (the default). High contrast for 1080p video:
+   nothing important is in pale grey, and every colour also has a word next to it. */
+@theme {
+  --color-ink: #f4f6f9;      /* page background */
+  --color-panel: #ffffff;    /* cards */
+  --color-line: #d5dce5;     /* borders */
+  --color-text: #0f172a;     /* main text */
+  --color-muted: #334155;    /* secondary text, still dark enough to read on camera */
+  --color-up: #047857;       /* green */
+  --color-down: #be123c;     /* red */
+  --color-warn: #b45309;     /* amber */
+  --color-accent: #0369a1;   /* blue */
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+html {
+  background: var(--color-ink);
+  color: var(--color-text);
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+:focus-visible {
+  outline: 3px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Animated status arrows ---------- */
+
+/* Up arrow drifts upward and fades back, like something rising. */
+@keyframes arrow-rise {
+  0% { transform: translateY(4px); opacity: 0.35; }
+  55% { transform: translateY(-3px); opacity: 1; }
+  100% { transform: translateY(-5px); opacity: 0; }
+}
+
+/* Down arrow sinks. */
+@keyframes arrow-sink {
+  0% { transform: translateY(-4px); opacity: 0.35; }
+  55% { transform: translateY(3px); opacity: 1; }
+  100% { transform: translateY(5px); opacity: 0; }
+}
+
+/* Amber "attention" dot for stale / failing. */
+@keyframes attention {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.7); opacity: 0.5; }
+}
+
+.arrow-rise { animation: arrow-rise 1.4s ease-out infinite; }
+.arrow-sink { animation: arrow-sink 1.4s ease-out infinite; }
+.arrow-rise.delay, .arrow-sink.delay { animation-delay: 0.7s; }
+.attention { animation: attention 1.2s ease-in-out infinite; }
+
+/* Price flash when a value changes. */
+@keyframes flash-up { from { background: rgb(4 120 87 / 0.22); } to { background: transparent; } }
+@keyframes flash-down { from { background: rgb(190 18 60 / 0.2); } to { background: transparent; } }
+.flash-up { animation: flash-up 0.9s ease-out; }
+.flash-down { animation: flash-down 0.9s ease-out; }
+
+/* Respect people who ask for less motion: arrows stand still, no flashing. */
+@media (prefers-reduced-motion: reduce) {
+  .arrow-rise, .arrow-sink, .attention, .flash-up, .flash-down {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+  .arrow-rise.delay, .arrow-sink.delay { display: none; }
+}

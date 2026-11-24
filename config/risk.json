@@ -1,0 +1,19 @@
+{
+  "riskPerTradeBps": { "value": 100, "min": 10, "max": 200, "help": "Most you can lose on one trade, in basis points of equity (100 = 1%)." },
+  "maxAssetBps": { "value": 2500, "min": 500, "max": 5000, "help": "Largest position in one asset, in basis points of equity (2500 = 25%)." },
+  "maxExposureBps": { "value": 6000, "min": 1000, "max": 9000, "help": "Total value of all open positions, in basis points of equity." },
+  "maxTradesPerDay": { "value": 10, "min": 1, "max": 50, "help": "New entries allowed per UTC day." },
+  "dailyLossLimitBps": { "value": 200, "min": 50, "max": 500, "help": "Stop new orders for the UTC day after losing this much of start-of-day equity (200 = 2%)." },
+  "dailyLossWarnPct": { "value": 80, "min": 50, "max": 95, "help": "Warn when this share of the daily loss limit is used." },
+  "maxDrawdownBps": { "value": 1500, "min": 500, "max": 2500, "help": "Close everything and require a PIN restart when equity falls this far below its high-water mark (1500 = 15%)." },
+  "minConfidence": { "value": "medium", "allowed": ["medium", "high"], "help": "Lowest AI confidence that can become an order. Low is always log-only." },
+  "minRewardToRisk": { "value": 1.5, "min": 1.5, "max": 5, "help": "Target distance divided by stop distance must be at least this." },
+  "stopAtrMin": { "value": 0.5, "min": 0.5, "max": 2, "help": "Stop must be at least this many ATRs from entry." },
+  "stopAtrMax": { "value": 5, "min": 2, "max": 5, "help": "Stop must be at most this many ATRs from entry." },
+  "maxEntryDeviationBps": { "value": 30, "min": 5, "max": 30, "help": "Entry must be within this distance of the current price (30 = 0.3%)." },
+  "maxSignalAgeMin": { "value": 15, "min": 1, "max": 15, "help": "Signals older than this are discarded." },
+  "maxSnapshotAgeMin": { "value": 2, "min": 1, "max": 2, "help": "The snapshot behind a signal must be at most this old." },
+  "feedDisagreementBps": { "value": 50, "min": 10, "max": 200, "help": "Pause signals when the two price feeds differ by more than this (50 = 0.5%)." },
+  "feedStaleSeconds": { "value": 15, "min": 5, "max": 60, "help": "A feed with no data for this long is stale." },
+  "feedResumeSeconds": { "value": 60, "min": 30, "max": 600, "help": "Feeds must agree for this long before signals resume." }
+}

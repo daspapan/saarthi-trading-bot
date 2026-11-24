@@ -1,0 +1,38 @@
+{
+  "name": "saarthi",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local AI trading bot demo: the AI is the analyst, never the trader. Testnet only.",
+  "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run migrate && concurrently -k -n api,feed,analyst,executor,risk,web -c cyan,green,magenta,red,yellow,blue \"npm:dev:api\" \"npm:dev:feed\" \"npm:dev:analyst\" \"npm:dev:executor\" \"npm:dev:risk\" \"npm:dev:web\"",
+    "dev:api": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env apps/api/src/index.ts",
+    "dev:feed": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env apps/feed/src/index.ts",
+    "dev:analyst": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env apps/analyst/src/index.ts",
+    "dev:executor": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --env-file-if-exists=.env.local apps/executor/src/index.ts",
+    "dev:risk": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env apps/risk/src/index.ts",
+    "dev:web": "npm run dev --workspace=@saarthi/web",
+    "migrate": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/migrate.ts",
+    "seed": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/seed.ts",
+    "pin:hash": "node --disable-warning=ExperimentalWarning scripts/pin-hash.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "coverage": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "@vitest/coverage-v8": "^5.1.1",
+    "concurrently": "^9.0.0",
+    "typescript": "^5.8.0",
+    "vitest": "^5.1.1"
+  }
+}

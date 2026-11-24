@@ -1,0 +1,19 @@
+{
+  // Type-check only. Node runs the .ts files directly (built-in type stripping),
+  // so we never emit JS and we only use syntax that can be stripped (no enums).
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "erasableSyntaxOnly": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  },
+  "include": ["packages/*/src", "packages/*/test", "apps/api/src", "apps/feed/src", "apps/analyst/src", "apps/executor/src", "apps/risk/src", "apps/*/test", "scripts"],
+  "exclude": ["apps/web"]
+}

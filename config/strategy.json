@@ -1,0 +1,18 @@
+{
+  "pairs": { "value": ["BTC/USDT", "ETH/USDT", "SOL/USDT"], "allowed": ["BTC/USDT", "ETH/USDT", "SOL/USDT"], "help": "Pairs the system watches and may trade." },
+
+  "statArb.enabled": { "value": true, "help": "Statistical arbitrage on the BTC/ETH price ratio." },
+  "statArb.lookbackCandles": { "value": 96, "min": 48, "max": 480, "help": "15m candles used for the ratio's mean and spread (96 = 1 day)." },
+  "statArb.zEntry": { "value": 2, "min": 1.5, "max": 3.5, "help": "Ratio z-score that creates a candidate." },
+  "statArb.zExit": { "value": 0.5, "min": 0, "max": 1, "help": "Ratio z-score at which the gap counts as closed." },
+
+  "momentum.enabled": { "value": true, "help": "Momentum with strict exits." },
+  "momentum.minVolumeRatio": { "value": 1.3, "min": 1, "max": 3, "help": "Volume must be at least this multiple of its 30-day average." },
+  "momentum.stopAtr": { "value": 1.5, "min": 0.5, "max": 5, "help": "Stop distance in ATRs." },
+  "momentum.targetR": { "value": 2, "min": 1.5, "max": 5, "help": "Target distance as a multiple of the stop distance." },
+
+  "meanReversion.enabled": { "value": true, "help": "Mean reversion in low volatility." },
+  "meanReversion.maxBandWidthPct": { "value": 4, "min": 1, "max": 10, "help": "Bollinger band width (as % of price) below which volatility counts as low." },
+  "meanReversion.rsiEntry": { "value": 30, "min": 15, "max": 40, "help": "RSI at or below this suggests a stretched move down." },
+  "meanReversion.stopAtr": { "value": 1, "min": 0.5, "max": 5, "help": "Stop distance in ATRs." }
+}
