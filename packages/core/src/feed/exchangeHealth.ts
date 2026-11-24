@@ -4,6 +4,7 @@
 
 import { appendAudit } from "../audit.ts";
 import { type Db, nowIso } from "../db/db.ts";
+import { discardPending } from "../queue.ts";
 import { setRiskFlag } from "./store.ts";
 
 export const HEALTH_CHECK_INTERVAL_MS = 30_000;
@@ -38,10 +39,7 @@ export class ExchangeHealth {
 
 /** Marks every pending queue item for this venue as discarded. Returns how many. */
 export function discardPendingSignals(db: Db, venue: string): number {
-  const info = db
-    .prepare("UPDATE order_queue SET status = 'discarded' WHERE status = 'pending' AND venue = ?")
-    .run(venue);
-  return Number(info.changes);
+  return discardPending(db, `${venue} became unavailable (${FAILURES_BEFORE_UNAVAILABLE} failed health checks in a row).`, venue);
 }
 
 /**

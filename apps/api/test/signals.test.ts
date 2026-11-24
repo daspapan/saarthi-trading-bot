@@ -95,7 +95,16 @@ describe("POST /signals: guardrails run in the API and everything is stored", ()
     close();
     expect(r.status).toBe(201);
     expect(r.body.signals).toEqual([
-      { id: expect.any(Number), pair: "BTC/USDT", direction: "long", passed: true, reasons: [] },
+      {
+        id: expect.any(Number),
+        pair: "BTC/USDT",
+        direction: "long",
+        passed: true,
+        reasons: [],
+        // Guardrails passed, but this bare test database has no prices, equity or feed data, so the validator says no.
+        validator: { passed: false, failedRules: expect.arrayContaining([2, 3, 7, 12]) },
+        queue: { status: "not-queued", reason: expect.stringMatching(/^Failed rules /) },
+      },
       { id: expect.any(Number), pair: "ETH/USDT", direction: "neutral", passed: false, reasons: ["No signal returned for this pair."] },
     ]);
     const row = db.prepare("SELECT run_id, model, latency_ms, trigger, candidate_id, source FROM signals WHERE pair = 'BTC/USDT'").get();
@@ -186,7 +195,7 @@ describe("POST /signals: guardrails run in the API and everything is stored", ()
       prev_hash: string;
       hash: string;
     }[];
-    expect(audit.map((a) => `${a.event_type}/${a.actor}`)).toEqual(["signal/analyst", "signal/analyst"]);
+    expect(audit.map((a) => `${a.event_type}/${a.actor}`)).toEqual(["signal/analyst", "signal/analyst", "rule_result/validator"]);
     expect(audit[1]!.prev_hash).toBe(audit[0]!.hash);
     expect(JSON.parse(audit[0]!.payload_json)).toMatchObject({ pair: "BTC/USDT", guardrailsPassed: true, snapshotHash: HASH });
   });

@@ -8,7 +8,7 @@ Based on the LinkedIn articles "Trading Bot Part 01: What the YouTube video didn
 
 ## Status
 
-Phase 4 of 9 done.
+Phase 5 of 9 done.
 
 - Phase 1: workspace skeleton, config loading, SQLite migrations, testnet-only guard, `/health`, one-command start.
 - Phase 2: two live price feeds (Binance Spot Testnet plus a public cross-check), 1m/15m/4h candles, `price_state` every 5 seconds, the stale and disagreement pause, exchange health checks, gap backfill, and a live health strip with price tiles.
@@ -16,7 +16,9 @@ Phase 4 of 9 done.
 
 - Phase 4: the AI analyst (Ollama) with snapshots, a prompt that fences outside text, retries and fail-closed, the guardrails (schema, grounding of every cited number, injection screen) and the AI Analyst page.
 
-No orders yet: the validator and order queue come next.
+- Phase 5: the deterministic 12-rule validator (checked against live state) and the order queue (dedupe, oldest first, stale items dropped, discard on kill switch), with each rule's result on the AI Analyst cards.
+
+No orders are placed yet: the executor comes next.
 
 ## Setup on a Mac
 
@@ -126,6 +128,10 @@ All read-only for now. Errors are `{ "error": "plain-language reason" }`.
 
 `GET /snapshots/:hash`: exactly what the AI saw for that run.
 
+After the guardrails, every "long" or "exit" signal goes through the 12-rule validator against live state. If all 12 pass, it is queued. Each stored signal in the `POST /signals` reply then also has `validator: { passed, failedRules }` and `queue: { status: "queued" | "duplicate" | "not-queued", ... }`, and each card in `GET /signals` has `validator: { passed, rules: [{ rule, name, passed, message }] }` and `queue: { id, status, statusReason, createdAt }`.
+
+`GET /queue?limit=50`: newest first, `{ items: [{ id, dedupeId, signalId, pair, direction, venue, status, statusReason, payload, createdAt, takenAt }] }`. `status` is `pending`, `taken`, `discarded` or `expired`.
+
 `POST /analyse`: "Analyse now". Returns `202 { requestId, analystRunning, message }`.
 
 The analyst's token (in `data/analyst.token`, created by the API) may read anything but write only to `/signals` and `/signals/heartbeat`; anything else gets 403.
@@ -149,5 +155,6 @@ The analyst's token (in `data/analyst.token`, created by the API) may read anyth
 - Logs redact key fields and scrub key values from error messages.
 - New signals pause whenever either price feed is stale (15 s), down, or disagrees with the other by more than 50 bps, and resume only after 60 s of agreement. If the feed process itself stops, prices are treated as untrusted.
 - Three failed exchange health checks in a row discard that exchange's pending signals.
+- Nothing reaches the order queue unless all 12 validator rules pass, checked against live state. The same signal can never be queued twice, and a queue item older than 15 minutes is dropped instead of executed.
 
 Design choices are recorded in [DECISIONS.md](DECISIONS.md).

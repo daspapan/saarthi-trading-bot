@@ -1,6 +1,6 @@
 // Display logic for the AI Analyst page (video scenes 2, 3 and 7).
 import { describe, expect, it } from "vitest";
-import { type SignalCard, directionBadge, groupByRun, runSummary, showValue, sourceLabel } from "../src/lib/analyst.ts";
+import { type SignalCard, directionBadge, groupByRun, nextStep, runSummary, showValue, sourceLabel } from "../src/lib/analyst.ts";
 
 const card = (o: Partial<SignalCard>): SignalCard => ({
   id: 1, runId: "r1", createdAt: "2026-01-01T10:00:00Z", pair: "BTC/USDT", direction: "neutral", confidence: null, source: "ollama",
@@ -43,5 +43,28 @@ describe("UI-02 AI Analyst display", () => {
     expect(showValue(61.25)).toBe("61.25");
     expect(showValue("sixty")).toBe('"sixty"');
     expect(showValue(null)).toBe("—");
+  });
+});
+
+describe("UI-04 what happened next", () => {
+  const rules = (failed: number[]) => Array.from({ length: 12 }, (_, i) => ({ rule: i + 1, name: `r${i + 1}`, passed: !failed.includes(i + 1), message: "m" }));
+  const base = { direction: "long", guardrails: { passed: true, reasons: [] } };
+
+  it("UI-04 neutral and rejected-before-validation signals say so", () => {
+    expect(nextStep({ ...base, direction: "neutral", validator: null, queue: null }).text).toBe("Nothing to do: no trade proposed.");
+    expect(nextStep({ direction: "invalid", guardrails: { passed: false, reasons: ["x"] }, validator: null, queue: null }).text).toBe("Rejected before the validator.");
+  });
+
+  it("UI-03 a validator failure lists the failed rules", () => {
+    expect(nextStep({ ...base, validator: { passed: false, rules: rules([1, 12]) }, queue: null })).toEqual({ text: "Not queued: failed rules 1, 12.", tone: "down" });
+    expect(nextStep({ ...base, validator: { passed: false, rules: rules([10]) }, queue: null }).text).toBe("Not queued: failed rule 10.");
+  });
+
+  it("UI-04 a queued signal shows its order number and queue status", () => {
+    const v = { passed: true, rules: rules([]) };
+    expect(nextStep({ ...base, validator: v, queue: { id: 7, status: "pending", statusReason: null, createdAt: "" } })).toEqual({ text: "Queued as order #7, waiting for the executor.", tone: "up" });
+    expect(nextStep({ ...base, validator: v, queue: { id: 7, status: "discarded", statusReason: "Kill switch pressed", createdAt: "" } }).text).toBe("Order #7 discarded: Kill switch pressed");
+    expect(nextStep({ ...base, validator: v, queue: { id: 7, status: "expired", statusReason: "Older than 15 minutes", createdAt: "" } }).tone).toBe("warn");
+    expect(nextStep({ ...base, validator: v, queue: null }).text).toMatch(/already queued: not queued twice/);
   });
 });

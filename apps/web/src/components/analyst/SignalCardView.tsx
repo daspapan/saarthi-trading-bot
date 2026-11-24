@@ -2,7 +2,7 @@
 
 // One AI signal: what it said, the evidence check ("AI said" vs "snapshot"),
 // the candidate it chose (numbers computed by code), and the guardrail verdict.
-import { type SignalCard, directionBadge, showValue } from "@/lib/analyst";
+import { type SignalCard, directionBadge, nextStep, showValue } from "@/lib/analyst";
 import { formatPrice } from "@/lib/status";
 import { TrendArrow } from "../TrendArrow";
 
@@ -70,6 +70,43 @@ function CandidateBox({ c }: { c: NonNullable<SignalCard["candidate"]> }) {
   );
 }
 
+/** The validator's 12 rules: passed ones compact (full message on hover), failed ones with their reason. */
+function RuleList({ rules, passed }: { rules: NonNullable<SignalCard["validator"]>["rules"]; passed: boolean }) {
+  return (
+    <section className={`mt-3 rounded-xl border p-3 ${passed ? "border-up/40 bg-up/5" : "border-down/40 bg-down/5"}`}>
+      <p className={`text-sm font-black ${passed ? "text-up" : "text-down"}`}>
+        Validator: {passed ? "all 12 rules passed" : `${rules.filter((r) => !r.passed).length} of 12 rules failed`}
+        <span className="ml-1 text-xs font-semibold text-muted">(deterministic code; the AI can't see or change these limits)</span>
+      </p>
+      <ol className="mt-1.5 grid gap-x-4 gap-y-0.5 text-sm sm:grid-cols-2">
+        {rules.map((r, i) => (
+          <li key={r.rule} title={r.message} className={`evidence-row flex gap-1.5 ${r.passed ? "" : "sm:col-span-2"}`} style={{ animationDelay: `${100 + i * 70}ms` }}>
+            <span className={`evidence-tick num w-4 shrink-0 font-black ${r.passed ? "text-up" : "text-down"}`} style={{ animationDelay: `${100 + i * 70}ms` }}>
+              {r.passed ? "✓" : "✗"}
+            </span>
+            <span>
+              <span className="num font-bold text-muted">{r.rule}.</span> <span className="font-semibold">{r.name}</span>
+              {!r.passed && <span className="block text-xs font-semibold text-down">{r.message}</span>}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
+
+const NEXT_TONE = { up: "border-up/40 text-up", down: "border-down/40 text-down", warn: "border-warn/50 text-warn", idle: "border-line text-muted" } as const;
+
+function NextStep({ s }: { s: SignalCard }) {
+  const step = nextStep(s);
+  return (
+    <p className={`mt-3 rounded-lg border border-dashed px-3 py-2 text-sm font-bold ${NEXT_TONE[step.tone]}`}>
+      <span className="text-xs font-bold uppercase text-muted">What happened next: </span>
+      {step.text}
+    </p>
+  );
+}
+
 export function SignalCardView({ s }: { s: SignalCard }) {
   const badge = directionBadge(s.direction);
   const system = s.source !== "ollama";
@@ -129,16 +166,8 @@ export function SignalCardView({ s }: { s: SignalCard }) {
         </div>
       )}
 
-      <footer className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-        <div className="rounded-lg border border-dashed border-line px-3 py-2">
-          <p className="text-xs font-bold uppercase text-muted">Validator rules</p>
-          <p className="font-semibold text-muted">{s.guardrails.passed && s.direction !== "neutral" ? "The 12 deterministic risk rules run here from phase 5." : "Not sent to the validator."}</p>
-        </div>
-        <div className="rounded-lg border border-dashed border-line px-3 py-2">
-          <p className="text-xs font-bold uppercase text-muted">What happened next</p>
-          <p className="font-semibold text-muted">No order: orders start in phase 6.</p>
-        </div>
-      </footer>
+      {s.validator && <RuleList rules={s.validator.rules} passed={s.validator.passed} />}
+      <NextStep s={s} />
     </article>
   );
 }

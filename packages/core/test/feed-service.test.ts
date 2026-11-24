@@ -369,7 +369,10 @@ describe("FEED-07 exchange health", () => {
     up = true;
     expect(await service.checkExchange()).toBe("recovered");
     expect(getRiskFlag(db, "exchange_unavailable").active).toBe(false);
-    expect(auditTypes(db)).toEqual(["health_alarm:exchange_unavailable", "health_resumed:exchange_available"]);
+    expect(auditTypes(db)).toEqual(["queue_discarded:undefined", "health_alarm:exchange_unavailable", "health_resumed:exchange_available"]);
+    expect(db.prepare("SELECT DISTINCT status_reason FROM order_queue WHERE status = 'discarded'").get()).toEqual({
+      status_reason: "binance became unavailable (3 failed health checks in a row).",
+    });
   });
 
   it("FEED-07 a success in between resets the count, so three non-consecutive failures do nothing", async () => {

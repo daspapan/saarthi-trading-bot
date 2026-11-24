@@ -179,3 +179,35 @@ The validator and "what happened next" boxes are placeholders until phases 5 and
 **Not done here:** the AI evaluations against the real model (AI-01 to AI-07, 5 runs each) are phase 9 as the spec says. I verified the full path with a scripted stand-in for Ollama, because Ollama can't run in my workspace. Your first "Analyse now" with `qwen2.5:7b` is the real test, and the guardrails will show exactly what, if anything, the model gets wrong.
 
 **Phase 4 test IDs:** SNAP-01 to SNAP-03, AN-01 to AN-07, GR-01 to GR-11, CFG-09, plus API-02/API-03 for the new endpoints, AUD-01 for signal audit rows, and UI-02/03/07 display logic.
+
+## Phase 5
+
+**The validator is one pure function, `validateSignal`, and it always returns all 12 rules in order.** No database, network, file or clock access: the current time and the live state are passed in. A test checks the source for forbidden imports and calls, runs it on a deep-frozen input, and confirms the same input gives the same output.
+
+**It checks against LIVE state, not the AI's snapshot.** At validation time the API reads fresh: price feed trust, kill switch and manual-restart flags, daily-loss flag, equity, cash, open positions, pending orders, today's trades, and the latest price for rule 12. The snapshot may be a minute or two old; the market and the account may have changed since.
+
+**Rule details:**
+- **Rule 1** is the guardrails' verdict. Signals the guardrails rejected still get the full 12-line checklist, so a forged signal shows exactly what failed (scene 3).
+- **Rule 2:** the signal must be at most 15 minutes old at validation, and the snapshot at most 2 minutes old when the signal arrived. A slow model (two 60-second attempts) can therefore turn its own signal stale, which is the intended behaviour.
+- **Rule 10:** low confidence is always "logged only", never traded. The minimum (`minConfidence`) can be raised to high, never lowered to low.
+- **Rule 12:** the candidate's entry must be within 0.3% of the latest price in `price_state`.
+
+**Exits** (stat-arb selling what it bought):
+- They skip the rules that only limit new risk (5, 6, 7, 11) and the confidence minimum, because selling reduces risk.
+- They must hold the asset and sell no more than is held (rule 8, VAL-15: no shorts, no borrowing), have no other order in flight (rule 9), and be close to the current price (rule 12).
+
+**Neutral signals never reach the validator or the queue.**
+
+**The dedupe ID** is `sha256(canonical JSON of {snapshotHash, pair, direction, candidateId})`: what makes a signal *the same signal*. Resubmitting the same analysis is ignored at the queue (Q-02). In practice rule 9 usually stops the copy first, because the original is already pending for that pair. Phase 6 uses the same ID as the exchange's client order ID.
+
+**Queue states:** `pending` → `taken` (claimed atomically by the executor), or `discarded` (kill switch, drawdown, exchange outage, with the reason) or `expired` (older than 15 minutes when picked up, with the reason). Pickup is oldest first. Every change is audited (`queued`, `queue_discarded`, `queue_expired`).
+
+**"Trades per day"** counts buys that reached the queue today and weren't discarded or expired. Within one analysis run, a queued buy immediately counts as pending for its pair and as a trade, so two signals in the same run can't double up.
+
+**Validation happens inside the same database transaction as storing the signal,** with `BEGIN IMMEDIATE`. Storing, the 12 rules, the queue insert and the audit rows all happen, or none do.
+
+**The exchange-outage discard (phase 2)** now goes through the same `discardPending`, so the reason is stored and audited like any other discard.
+
+**On the cards,** "Validator rules" shows the 12-line checklist. Passed rules are compact, with the full message on hover; failed rules show their reason in red. "What happened next" shows the queue outcome: queued as order #N, discarded or dropped with the reason, not queued with the failed rule numbers, or a duplicate. Orders themselves start in phase 6.
+
+**Phase 5 test IDs:** VAL-01 to VAL-15 (a passing and a failing case for each of the 12 rules, plus every-rule-reported, purity and no-margin), Q-01 to Q-06, plus API flow tests (signal → guardrails → validator → queue, AUD-01 ordering) and UI-03/UI-04 display logic.

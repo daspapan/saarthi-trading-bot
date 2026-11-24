@@ -23,7 +23,11 @@ export type SignalCard = {
   candidate: Candidate | null;
   evidence: { name: string; aiValue: unknown; snapshotValue: number | null; match: boolean }[];
   guardrails: { passed: boolean; reasons: string[] };
+  validator: { passed: boolean; rules: RuleResult[] } | null;
+  queue: { id: number; status: string; statusReason: string | null; createdAt: string } | null;
 };
+
+export type RuleResult = { rule: number; name: string; passed: boolean; message: string };
 
 export type Run = {
   runId: string;
@@ -83,4 +87,25 @@ export function runSummary(run: Run): { passed: number; rejected: number } {
 
 export function timeOf(iso: string): string {
   return new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+export type NextStep = { text: string; tone: Tone };
+
+/** The "what happened next" line for a signal. */
+export function nextStep(card: Pick<SignalCard, "direction" | "guardrails" | "validator" | "queue">): NextStep {
+  if (card.direction !== "long" && card.direction !== "exit") {
+    return { text: card.guardrails.passed ? "Nothing to do: no trade proposed." : "Rejected before the validator.", tone: "idle" };
+  }
+  if (!card.validator) return { text: "Not validated.", tone: "idle" };
+  if (!card.validator.passed) {
+    const failed = card.validator.rules.filter((r) => !r.passed).map((r) => r.rule);
+    return { text: `Not queued: failed rule${failed.length > 1 ? "s" : ""} ${failed.join(", ")}.`, tone: "down" };
+  }
+  if (!card.queue) return { text: "Passed every rule, but an identical signal was already queued: not queued twice.", tone: "warn" };
+  const q = card.queue;
+  if (q.status === "pending") return { text: `Queued as order #${q.id}, waiting for the executor.`, tone: "up" };
+  if (q.status === "taken") return { text: `Order #${q.id} picked up by the executor.`, tone: "up" };
+  if (q.status === "discarded") return { text: `Order #${q.id} discarded: ${q.statusReason ?? "no reason given"}`, tone: "warn" };
+  if (q.status === "expired") return { text: `Order #${q.id} dropped: ${q.statusReason ?? "too old"}`, tone: "warn" };
+  return { text: `Order #${q.id}: ${q.status}.`, tone: "idle" };
 }

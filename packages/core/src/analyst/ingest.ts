@@ -6,7 +6,11 @@
 
 import { z } from "zod";
 import { appendAudit } from "../audit.ts";
+import type { SettingsFile } from "../config/settings.ts";
 import { type Db, nowIso } from "../db/db.ts";
+import { readLiveState } from "../live.ts";
+import { enqueue, queueItemForSignal } from "../queue.ts";
+import { type RuleResult, allPassed, liveLimitsFrom, validateSignal } from "../validator.ts";
 import { checkSignal } from "./guardrails.ts";
 import { type Snapshot, snapshotHash, storeSnapshot } from "./snapshot.ts";
 
@@ -30,12 +34,32 @@ export const submissionSchema = z.strictObject({
   attempts: z.number().int().min(0).max(5),
 });
 
-export type StoredSignal = { id: number; pair: string; direction: string; passed: boolean; reasons: string[] };
+export type QueueOutcome =
+  | { status: "queued"; queueId: number }
+  | { status: "duplicate"; queueId: number }
+  | { status: "not-queued"; reason: string };
+
+export type StoredSignal = {
+  id: number;
+  pair: string;
+  direction: string;
+  passed: boolean;
+  reasons: string[];
+  /** Only for "long" and "exit" signals: the validator's verdict and what happened in the queue. */
+  validator?: { passed: boolean; failedRules: number[] };
+  queue?: QueueOutcome;
+};
 export type IngestResult = { ok: true; runId: string; snapshotHash: string; signals: StoredSignal[] } | { ok: false; error: string };
 
 const MAX_DIRECTION_CHARS = 16;
 
-export function ingestAnalysis(db: Db, body: unknown): IngestResult {
+/**
+ * Stores an analysis run: guardrails on every signal, then (for "long" and "exit")
+ * the 12-rule validator against LIVE state, then the order queue if every rule passed.
+ * All in one transaction, all audited.
+ */
+export function ingestAnalysis(db: Db, body: unknown, opts: { risk: SettingsFile; nowMs?: number }): IngestResult {
+  const nowMs = opts.nowMs ?? Date.now();
   const parsed = submissionSchema.safeParse(body);
   if (!parsed.success) {
     const i = parsed.error.issues[0]!;
@@ -47,7 +71,8 @@ export function ingestAnalysis(db: Db, body: unknown): IngestResult {
     return { ok: false, error: "The snapshot's hash doesn't match its contents." };
   }
 
-  const createdAt = nowIso();
+  const createdAt = new Date(nowMs).toISOString();
+  const extras = new Map<number, { candidateId: string | null; confidence: string | null }>();
   const stored: StoredSignal[] = [];
   // IMMEDIATE: take the write lock now, so the audit rows chain safely inside this transaction.
   db.exec("BEGIN IMMEDIATE");
@@ -78,6 +103,7 @@ export function ingestAnalysis(db: Db, body: unknown): IngestResult {
       const id = Number(info.lastInsertRowid);
       insertResult.run(id, passed ? 1 : 0, JSON.stringify(reasons), createdAt);
       stored.push({ id, pair, direction, passed, reasons });
+      extras.set(id, { candidateId, confidence });
     };
 
     const pairs = snapshot.pairs.map((p) => p.pair);
@@ -124,6 +150,53 @@ export function ingestAnalysis(db: Db, body: unknown): IngestResult {
         snapshotHash: sub.snapshotHash,
       });
     }
+    // The validator: every "long" or "exit" signal, even one the guardrails rejected,
+    // gets the full 12-rule checklist (rule 1 shows the guardrail verdict).
+    const live = readLiveState(db, nowMs);
+    const limits = liveLimitsFrom(opts.risk);
+    const insertRules = db.prepare("INSERT INTO validator_results (signal_id, passed, rules_json, created_at) VALUES (?, ?, ?, ?)");
+    for (const s of stored) {
+      if (s.direction !== "long" && s.direction !== "exit") continue;
+      const extra = extras.get(s.id)!;
+      const candidate = (extra.candidateId && snapshot.candidates.find((c) => c.id === extra.candidateId)) || null;
+      const rules: RuleResult[] = validateSignal({
+        nowMs,
+        signal: {
+          pair: s.pair,
+          direction: s.direction,
+          confidence: extra.confidence,
+          createdAtMs: nowMs,
+          guardrailsPassed: s.passed,
+          guardrailReasons: s.reasons,
+        },
+        snapshotCreatedAtMs: Date.parse(snapshot.createdAt),
+        candidate,
+        feeds: live.feeds,
+        flags: live.flags,
+        state: live.state,
+        currentPrice: live.prices[s.pair] ?? null,
+        limits,
+      });
+      const ok = allPassed(rules);
+      insertRules.run(s.id, ok ? 1 : 0, JSON.stringify(rules), createdAt);
+      s.validator = { passed: ok, failedRules: rules.filter((r) => !r.passed).map((r) => r.rule) };
+      appendAudit(db, "rule_result", "validator", { signalId: s.id, pair: s.pair, passed: ok, failedRules: s.validator.failedRules });
+
+      if (!ok || !candidate) {
+        s.queue = { status: "not-queued", reason: `Failed rule${s.validator.failedRules.length > 1 ? "s" : ""} ${s.validator.failedRules.join(", ")}.` };
+        continue;
+      }
+      const q = enqueue(
+        db,
+        { signalId: s.id, snapshotHash: sub.snapshotHash, pair: s.pair, direction: s.direction, candidateId: candidate.id, confidence: extra.confidence, candidate },
+        { nowMs },
+      );
+      s.queue = q.queued ? { status: "queued", queueId: q.id } : { status: "duplicate", queueId: q.duplicateOf };
+      // A queued buy uses a pending slot for its pair straight away (a second signal in this run can't double up).
+      live.state.pendingPairs.push(s.pair);
+      if (s.direction === "long" && q.queued) live.state.tradesToday += 1;
+    }
+
     db.exec("COMMIT");
   } catch (err) {
     db.exec("ROLLBACK");
@@ -155,6 +228,10 @@ export type SignalCard = {
   candidate: Snapshot["candidates"][number] | null;
   evidence: EvidenceRow[];
   guardrails: { passed: boolean; reasons: string[] };
+  /** The 12-rule checklist (only for "long" and "exit" signals). */
+  validator: { passed: boolean; rules: RuleResult[] } | null;
+  /** What happened next: the queue item, if the signal reached the queue. */
+  queue: { id: number; status: string; statusReason: string | null; createdAt: string } | null;
 };
 
 type Row = {
@@ -227,6 +304,16 @@ export function listSignalCards(db: Db, limit = 60): SignalCard[] {
       candidate: (r.candidate_id && snap?.candidates.find((c) => c.id === r.candidate_id)) || null,
       evidence,
       guardrails: { passed: r.passed === 1, reasons: r.reasons_json ? (JSON.parse(r.reasons_json) as string[]) : [] },
+      validator: (() => {
+        const v = db.prepare("SELECT passed, rules_json FROM validator_results WHERE signal_id = ? ORDER BY id DESC LIMIT 1").get(r.id) as
+          | { passed: number; rules_json: string }
+          | undefined;
+        return v ? { passed: v.passed === 1, rules: JSON.parse(v.rules_json) as RuleResult[] } : null;
+      })(),
+      queue: (() => {
+        const q = queueItemForSignal(db, r.id);
+        return q ? { id: q.id, status: q.status, statusReason: q.statusReason, createdAt: q.createdAt } : null;
+      })(),
     };
   });
 }

@@ -18,6 +18,7 @@ import {
   ensureAnalystToken,
   failStaleRuns,
   ingestAnalysis,
+  listQueue,
   listSignalCards,
   loadSnapshot,
   requestAnalysis,
@@ -113,7 +114,8 @@ export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string } 
   // ---------- AI analyst ----------
 
   app.post("/signals", (req, res) => {
-    const result = ingestAnalysis(db, req.body);
+    // Risk settings are read fresh each time, so an approved change applies at once.
+    const result = ingestAnalysis(db, req.body, { risk: loadSettingsFile(env.configDir, "risk.json") });
     if (!result.ok) {
       res.status(400).json({ error: result.error });
       return;
@@ -130,6 +132,11 @@ export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string } 
   app.get("/signals", (req, res) => {
     const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 60) || 60));
     res.json({ signals: listSignalCards(db, limit) });
+  });
+
+  app.get("/queue", (req, res) => {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit ?? 50) || 50));
+    res.json({ items: listQueue(db, limit) });
   });
 
   app.get("/snapshots/:hash", (req, res) => {
