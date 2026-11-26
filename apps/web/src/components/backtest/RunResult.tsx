@@ -20,7 +20,7 @@ import { formatPrice } from "@/lib/status";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { TrendArrow } from "../TrendArrow";
 
-const AXIS = { fontSize: 14, fontWeight: 600, fill: "#334155" };
+const AXIS = { fontSize: 14, fontWeight: 600, fill: "var(--color-muted)" };
 const shortDate = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
 
 function Stat({ label, value, tone, help, sub }: { label: string; value: string; tone?: "up" | "down" | "flat"; help: string; sub?: string }) {
@@ -67,13 +67,13 @@ function EquityChart({ run, animate }: { run: Run; animate: boolean }) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 5, right: 12, bottom: 0, left: 8 }}>
-            <CartesianGrid stroke="#e2e8f0" />
+            <CartesianGrid stroke="var(--color-line)" />
             <XAxis dataKey="time" type="number" domain={["dataMin", "dataMax"]} tickFormatter={shortDate} tick={AXIS} minTickGap={40} />
             <YAxis tick={AXIS} width={70} tickFormatter={(v) => Math.round(v).toLocaleString("en-US")} domain={["auto", "auto"]} />
             <Tooltip labelFormatter={(v) => fmtDate(Number(v))} formatter={(v) => fmtUsd(Number(v))} />
             <Legend wrapperStyle={{ fontWeight: 700 }} />
-            <Line name="Strategy" dataKey="strategy" stroke="#0369a1" strokeWidth={3} dot={false} isAnimationActive={animate} animationDuration={1600} />
-            <Line name="Buy & hold" dataKey="benchmark" stroke="#64748b" strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={animate} animationDuration={1600} />
+            <Line name="Strategy" dataKey="strategy" stroke="var(--color-accent)" strokeWidth={3} dot={false} isAnimationActive={animate} animationDuration={1600} />
+            <Line name="Buy & hold" dataKey="benchmark" stroke="var(--color-muted)" strokeWidth={2} strokeDasharray="6 4" dot={false} isAnimationActive={animate} animationDuration={1600} />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -89,11 +89,11 @@ function DrawdownChart({ run, animate }: { run: Run; animate: boolean }) {
       <div className="h-40">
         <ResponsiveContainer width="100%" height="100%">
           <AreaChart data={data} margin={{ top: 5, right: 12, bottom: 0, left: 8 }}>
-            <CartesianGrid stroke="#e2e8f0" />
+            <CartesianGrid stroke="var(--color-line)" />
             <XAxis dataKey="time" type="number" domain={["dataMin", "dataMax"]} tickFormatter={shortDate} tick={AXIS} minTickGap={40} />
             <YAxis tick={AXIS} width={70} tickFormatter={(v) => `${Number(v).toFixed(0)}%`} />
             <Tooltip labelFormatter={(v) => fmtDate(Number(v))} formatter={(v) => `${Number(v).toFixed(2)}%`} />
-            <Area dataKey="dd" name="Drawdown" stroke="#be123c" fill="#be123c" fillOpacity={0.15} strokeWidth={2} isAnimationActive={animate} animationDuration={1600} />
+            <Area dataKey="dd" name="Drawdown" stroke="var(--color-down)" fill="var(--color-down)" fillOpacity={0.15} strokeWidth={2} isAnimationActive={animate} animationDuration={1600} />
           </AreaChart>
         </ResponsiveContainer>
       </div>

@@ -255,3 +255,53 @@ describe("INT-09 drawdown limit: everything closed, manual restart with PIN", ()
     expect(restartTrading(w.db, "2468", PIN_HASH, "operator")).toEqual({ ok: true });
   });
 });
+
+describe("INT-10 halt and resume while the worker is paused (suggested by Anton Kann)", () => {
+  const newest = (w: ReturnType<typeof world>) => (w.db.prepare("SELECT status FROM order_queue ORDER BY id DESC LIMIT 1").get() as { status: string }).status;
+  it("INT-10 an approved order queued before the halt is never sent, and the cancel for the open position still goes out", async () => {
+    const w = world();
+    await w.openThree(); // BTC, ETH, SOL open and protected
+    // A fresh SOL signal passes the validator and waits in the queue...
+    w.db.prepare("UPDATE positions SET status = 'closed' WHERE pair = 'SOL/USDT'").run(); // (free SOL so a new SOL order would be valid)
+    w.queue("SOL/USDT");
+    expect(newest(w)).toBe("pending");
+
+    // ...the worker (executor) is paused: no ticks. The operator halts.
+    triggerLiquidation(w.db, { source: "kill-switch", reason: "halt with worker paused", actor: "operator" }, w.clock.now);
+    expect(newest(w)).toBe("discarded"); // the queued order is thrown away at once
+
+    // The operator tries to resume while the worker is still paused: refused, the halt stays open.
+    expect(restartTrading(w.db, "2468", PIN_HASH, "operator", w.clock.now)).toMatchObject({ ok: false, status: 409, error: expect.stringMatching(/Still closing/) });
+    expect(getRiskFlag(w.db, "kill_switch").active).toBe(true);
+
+    // The worker comes back: it cancels the protective orders and sells, and never sends the queued order.
+    const placedBefore = (w.db.prepare("SELECT COUNT(*) AS n FROM paper_orders WHERE side = 'buy'").get() as { n: number }).n;
+    for (let s = 0; s < 30 && getRiskFlag(w.db, "liquidate").active; s++) await w.tick();
+    const placedAfter = (w.db.prepare("SELECT COUNT(*) AS n FROM paper_orders WHERE side = 'buy'").get() as { n: number }).n;
+    expect(placedAfter).toBe(placedBefore); // no new entry reached the exchange
+    const cancelledOcoLegs = (w.db.prepare("SELECT COUNT(*) AS n FROM paper_orders WHERE list_client_id IS NOT NULL AND status = 'canceled'").get() as { n: number }).n;
+    expect(cancelledOcoLegs).toBeGreaterThanOrEqual(6); // stop and target of all three positions
+    expect(await w.paper.openOrders()).toEqual([]);
+
+    // Now resuming works, and the old queue item still never trades.
+    expect(restartTrading(w.db, "2468", PIN_HASH, "operator", w.clock.now)).toEqual({ ok: true });
+    await w.tick(5);
+    expect(newest(w)).toBe("discarded");
+    expect((w.db.prepare("SELECT COUNT(*) AS n FROM paper_orders WHERE side = 'buy'").get() as { n: number }).n).toBe(placedBefore);
+  });
+
+  it("INT-10 an order the worker had already claimed (but not sent) when it paused is cancelled, not sent", async () => {
+    const w = world();
+    w.queue("ETH/USDT");
+    // The worker claims it and creates the order row, then pauses before the re-check.
+    const { createOrderFromQueue, takeNext } = await import("../src/index.ts");
+    createOrderFromQueue(w.db, takeNext(w.db, w.clock.now)!, w.clock.now);
+    expect(w.states()).toEqual(["QUEUED"]);
+    triggerLiquidation(w.db, { source: "kill-switch", reason: "halt", actor: "operator" }, w.clock.now);
+    expect(restartTrading(w.db, "2468", PIN_HASH, "operator", w.clock.now)).toMatchObject({ ok: false, status: 409 });
+    await w.tick(2);
+    expect(w.states()).toEqual(["CANCELLED"]);
+    expect(w.db.prepare("SELECT COUNT(*) AS n FROM paper_orders").get()).toEqual({ n: 0 }); // nothing ever reached the exchange
+    expect(restartTrading(w.db, "2468", PIN_HASH, "operator", w.clock.now)).toEqual({ ok: true });
+  });
+});

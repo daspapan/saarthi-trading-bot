@@ -50,3 +50,6 @@ export * from "./alerts.ts";
 export * from "./notify.ts";
 export * from "./killSwitch.ts";
 export * from "./riskMonitor.ts";
+export * from "./config/settingsStore.ts";
+export * from "./performance.ts";
+export * from "./security/session.ts";

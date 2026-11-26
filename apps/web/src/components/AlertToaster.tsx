@@ -9,7 +9,7 @@ import useSWR from "swr";
 import { fetcher } from "@/lib/api";
 import { type Alert, newAlerts } from "@/lib/risk";
 
-const STYLE = { info: "border-accent bg-panel", warn: "border-warn bg-[#fff7ea]", critical: "border-down bg-[#fff0f2]" } as const;
+const STYLE = { info: "border-accent bg-panel", warn: "border-warn bg-warn-soft", critical: "border-down bg-down-soft" } as const;
 const WORD = { info: "Info", warn: "Warning", critical: "Critical" } as const;
 
 export function AlertToaster() {

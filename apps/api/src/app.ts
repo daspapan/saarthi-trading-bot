@@ -17,6 +17,21 @@ import {
   createRunRecord,
   ensureAnalystToken,
   failStaleRuns,
+  SESSION_COOKIE,
+  applySettingsChanges,
+  clientAddress,
+  createSession,
+  ensureSessionSecret,
+  isLoopback,
+  listAudit,
+  previewChanges,
+  readCookie,
+  readPerformance,
+  sessionSecretPath,
+  settingsHistory,
+  verifyChain,
+  verifySession,
+  NEEDS_RESTART,
   appendAudit,
   latestAlertId,
   listAlerts,
@@ -45,12 +60,56 @@ const PAIR_PATTERN = /^[A-Z0-9]{2,10}\/[A-Z0-9]{2,10}$/;
 /** The only writes the analyst's token may make (CFG-09). Everything else it tries gets a 403. */
 const ANALYST_WRITES = new Set(["POST /signals", "POST /signals/heartbeat"]);
 
-export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string } = {}) {
+export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string; sessionSecret?: string } = {}) {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json({ limit: "512kb" })); // a snapshot plus the model's raw answer
 
   const analystToken = opts.analystToken ?? ensureAnalystToken(analystTokenPath(env.dbPath));
+  const sessionSecret = opts.sessionSecret ?? ensureSessionSecret(sessionSecretPath(env.dbPath));
+
+  // Wrong PINs: at most 5 per minute, then a short lockout. Every wrong PIN is audited (RISK-08).
+  const pinFailures: number[] = [];
+  const pinLocked = () => {
+    const cutoff = Date.now() - 60_000;
+    while (pinFailures.length && pinFailures[0]! < cutoff) pinFailures.shift();
+    return pinFailures.length >= 5;
+  };
+
+  // Phone access (ALLOW_LAN): anyone not on this computer must unlock with the PIN first.
+  // The web app's LAN gateway tells us the caller's real address (see clientAddress).
+  const isLocal = (req: Request) => isLoopback(clientAddress(req.socket.remoteAddress, req.headers["x-saarthi-client"]));
+  const unlocked = (req: Request) => isLocal(req) || verifySession(sessionSecret, readCookie(req.headers.cookie, SESSION_COOKIE));
+  app.use((req, res, next) => {
+    if (req.path === "/session" || unlocked(req)) return next();
+    res.status(401).json({ error: "Locked. Enter the PIN to use the dashboard from this device.", locked: true });
+  });
+
+  app.get("/session", (req, res) => {
+    res.json({ local: isLocal(req), unlocked: unlocked(req), pinRequired: env.pinHash !== null, lanEnabled: env.allowLan });
+  });
+
+  app.post("/session", (req, res) => {
+    if (!env.pinHash) {
+      res.status(409).json({ error: "No PIN is set on this computer, so phone access is off." });
+      return;
+    }
+    if (pinLocked()) {
+      res.status(429).json({ error: "Too many wrong PINs. Wait a minute." });
+      return;
+    }
+    const pin = typeof req.body?.pin === "string" ? req.body.pin : "";
+    if (!verifyPin(pin, env.pinHash)) {
+      pinFailures.push(Date.now());
+      appendAudit(db, "pin_rejected", "operator", { action: "unlock", client: clientAddress(req.socket.remoteAddress, req.headers["x-saarthi-client"]) });
+      res.status(403).json({ error: "Wrong PIN." });
+      return;
+    }
+    const s = createSession(sessionSecret);
+    appendAudit(db, "session_unlocked", "operator", { client: clientAddress(req.socket.remoteAddress, req.headers["x-saarthi-client"]) });
+    res.setHeader("Set-Cookie", `${SESSION_COOKIE}=${s.value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor((s.expMs - Date.now()) / 1000)}`);
+    res.json({ ok: true, expiresAt: new Date(s.expMs).toISOString() });
+  });
 
   // Who is calling? The analyst proves itself with its token. It may read anything
   // and submit signals, nothing else. Nobody else may submit signals.
@@ -191,15 +250,57 @@ export function createApp(db: Db, env: BaseEnv, opts: { analystToken?: string } 
     });
   });
 
-  // ---------- risk, kill switch, alerts (phase 7) ----------
+  app.post("/settings/preview", (req, res) => {
+    const file = req.body?.file;
+    if (file !== "strategy.json" && file !== "risk.json") {
+      res.status(400).json({ error: "file must be strategy.json or risk.json." });
+      return;
+    }
+    const changes = req.body?.changes && typeof req.body.changes === "object" ? req.body.changes : {};
+    res.json({ lines: previewChanges(loadSettingsFile(env.configDir, file), changes), pinRequired: env.pinHash !== null });
+  });
 
-  // Wrong PINs: at most 5 per minute, then a short lockout. Every wrong PIN is audited (RISK-08).
-  const pinFailures: number[] = [];
-  const pinLocked = () => {
-    const cutoff = Date.now() - 60_000;
-    while (pinFailures.length && pinFailures[0]! < cutoff) pinFailures.shift();
-    return pinFailures.length >= 5;
-  };
+  app.post("/settings", (req, res) => {
+    if (pinLocked()) {
+      res.status(429).json({ error: "Too many wrong PINs. Wait a minute." });
+      return;
+    }
+    const r = applySettingsChanges(db, { configDir: env.configDir, file: req.body?.file, changes: req.body?.changes, pin: req.body?.pin, pinHash: env.pinHash, actor: "operator" });
+    if (!r.ok) {
+      if (r.status === 403) pinFailures.push(Date.now());
+      res.status(r.status).json({ error: r.error, lines: r.lines });
+      return;
+    }
+    const restart = r.applied.filter((l) => l.restart);
+    res.json({
+      ok: true,
+      applied: r.applied,
+      message: `Saved ${r.applied.length} change${r.applied.length === 1 ? "" : "s"}.${restart.length ? ` Restart npm run dev for ${restart.map((l) => l.key).join(", ")} to take effect.` : " They take effect on the next check."}`,
+    });
+  });
+
+  app.get("/settings/history", (_req, res) => {
+    res.json({ history: settingsHistory(db), needsRestart: NEEDS_RESTART });
+  });
+
+  // ---------- audit and performance (phase 8) ----------
+
+  app.get("/audit", (req, res) => {
+    const str = (v: unknown) => (typeof v === "string" && v ? v : undefined);
+    const before = Number(req.query.before);
+    res.json(listAudit(db, { type: str(req.query.type), actor: str(req.query.actor), q: str(req.query.q), before: Number.isInteger(before) && before > 0 ? before : undefined, limit: Number(req.query.limit) || 100 }));
+  });
+
+  app.get("/audit/verify", (_req, res) => {
+    const started = Date.now();
+    res.json({ ...verifyChain(db), ms: Date.now() - started });
+  });
+
+  app.get("/performance", (_req, res) => {
+    res.json(readPerformance(db));
+  });
+
+  // ---------- risk, kill switch, alerts (phase 7) ----------
 
   app.get("/risk", (_req, res) => {
     const view = readRiskView(db, loadSettingsFile(env.configDir, "risk.json"));

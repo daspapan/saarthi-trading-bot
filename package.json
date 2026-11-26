@@ -18,7 +18,7 @@
     "dev:analyst": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env apps/analyst/src/index.ts",
     "dev:executor": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env --env-file-if-exists=.env.local apps/executor/src/index.ts",
     "dev:risk": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env apps/risk/src/index.ts",
-    "dev:web": "npm run dev --workspace=@saarthi/web",
+    "dev:web": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/web.ts dev",
     "migrate": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/migrate.ts",
     "kill": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/kill.ts",
     "seed": "node --disable-warning=ExperimentalWarning --env-file-if-exists=.env scripts/seed.ts",

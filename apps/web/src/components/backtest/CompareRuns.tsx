@@ -7,8 +7,8 @@ import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, X
 import { type Run, type RunSummary, STRATEGY_NAMES, compareRows, fmtDate, fmtPct, fmtPlainPct, fmtRatio, normalise } from "@/lib/backtest";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 
-const COLORS = ["#0369a1", "#b45309", "#7c3aed"];
-const AXIS = { fontSize: 14, fontWeight: 600, fill: "#334155" };
+const COLORS = ["var(--color-accent)", "var(--color-warn)", "#7c3aed"];
+const AXIS = { fontSize: 14, fontWeight: 600, fill: "var(--color-muted)" };
 
 type Props = {
   runs: RunSummary[];
@@ -97,7 +97,7 @@ export function ComparePanel({ ids }: { ids: number[] }) {
       <div className="h-72">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart margin={{ top: 5, right: 12, bottom: 0, left: 8 }}>
-            <CartesianGrid stroke="#e2e8f0" />
+            <CartesianGrid stroke="var(--color-line)" />
             <XAxis
               dataKey="time"
               type="number"

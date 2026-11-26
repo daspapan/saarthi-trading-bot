@@ -68,9 +68,9 @@ describe("CFG-07 network exposure", () => {
     expect(resolveBindHost(loadBaseEnv(validEnv()))).toBe("127.0.0.1");
   });
 
-  it("CFG-07 binds to the LAN only when ALLOW_LAN=true and a PIN hash exists", () => {
+  it("CFG-07 the API stays on 127.0.0.1 even with ALLOW_LAN=true (phones come through the PIN-gated web gateway)", () => {
     const pinHash = hashPin("4321");
-    expect(resolveBindHost(loadBaseEnv(validEnv({ ALLOW_LAN: "true", PIN_HASH: pinHash })))).toBe("0.0.0.0");
+    expect(resolveBindHost(loadBaseEnv(validEnv({ ALLOW_LAN: "true", PIN_HASH: pinHash })))).toBe("127.0.0.1");
   });
 
   it("CFG-07 refuses LAN without a PIN, and refuses a non-loopback API_HOST", () => {

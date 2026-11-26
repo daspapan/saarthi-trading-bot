@@ -2,6 +2,7 @@
 // its own limit and carries a word (OK / WARNING / LIMIT), never colour alone.
 
 import type { Gauge } from "@/lib/risk";
+import { Term } from "../Term";
 
 const COLOR = { ok: "var(--color-up)", warning: "var(--color-warn)", limit: "var(--color-down)" } as const;
 const TEXT = { ok: "text-up", warning: "text-warn", limit: "text-down" } as const;
@@ -32,7 +33,7 @@ export function RiskGauges({ gauges }: { gauges: Gauge[] }) {
     <div className="grid gap-4 sm:grid-cols-3">
       {gauges.map((g) => (
         <div key={g.key} className="flex flex-col items-center rounded-2xl border border-line bg-panel p-4 text-center shadow-sm" title={g.help}>
-          <h3 className="text-sm font-black uppercase tracking-wide text-muted">{g.label}</h3>
+          <h3 className="text-sm font-black uppercase tracking-wide text-muted"><Term t={g.key === "daily" ? "daily loss limit" : g.key}>{g.label}</Term></h3>
           <div className="relative mt-2 w-full max-w-44">
             <Arc pct={g.usedPct} level={g.level} />
             <span className="num absolute inset-x-0 bottom-0 text-2xl font-black">{g.value}</span>

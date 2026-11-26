@@ -8,7 +8,7 @@ Based on the LinkedIn articles "Trading Bot Part 01: What the YouTube video didn
 
 ## Status
 
-Phase 7 of 9 done.
+Phase 8 of 9 done.
 
 - Phase 1: workspace skeleton, config loading, SQLite migrations, testnet-only guard, `/health`, one-command start.
 - Phase 2: two live price feeds (Binance Spot Testnet plus a public cross-check), 1m/15m/4h candles, `price_state` every 5 seconds, the stale and disagreement pause, exchange health checks, gap backfill, and a live health strip with price tiles.
@@ -21,6 +21,8 @@ Phase 7 of 9 done.
 - Phase 6: the executor. One state machine (queued, re-check, place, wait for fill, place stop and target, open, closed) saved after every step, crash recovery and reconciliation on start, a simulated paper exchange and a Binance Spot Testnet client behind the same interface, and the Orders page.
 
 - Phase 7: the risk monitor (daily loss limit with an 80% warning, drawdown stop, health alarms), the kill switch (hold-to-confirm button, `POST /kill`, and `npm run kill` for when the API is down), alerts as toasts plus optional ntfy / Telegram, and the Cockpit page.
+
+- Phase 8: the Performance page (equity, drawdown, returns vs holding BTC, a daily P&L calendar), the Strategy and Risk page (change settings inside their ranges with the PIN), the Audit page (filters and "Verify chain"), dark mode, a Cmd+K command menu with keyboard shortcuts, plain-language tooltips, a phone layout with a STOP button, PIN-locked phone access over Wi-Fi, and installing the dashboard as a phone app.
 
 Trading defaults to paper mode.
 
@@ -93,6 +95,19 @@ Either way the executor cancels every order and sells every position within seco
 ### Alerts on your phone (optional)
 
 Alerts always show as toasts on the dashboard (and as browser notifications once you click "Enable browser notifications"). To get them on your phone too, set `NTFY_URL` (install the ntfy app and subscribe to a long random topic) and/or `TELEGRAM_BOT_TOKEN` plus `TELEGRAM_CHAT_ID` in `.env`. If sending fails, it is logged and trading carries on.
+
+### Using it from your phone
+
+1. Set a PIN (below) and `ALLOW_LAN=true` in `.env`, then restart `npm run dev`.
+2. The terminal prints `Dashboard on your network: http://192.168.x.x:3000`. Open that on your phone (same Wi-Fi).
+3. Enter the PIN. The phone stays unlocked for 12 hours.
+4. To install it: Safari > Share > Add to Home Screen, or Chrome > menu > Add to Home screen. It opens full screen with the STOP button always at the bottom.
+
+Over plain http on Wi-Fi the browser won't run the offline page (that needs https), but everything else works. Nothing on the phone is ever cached: prices, orders and the kill switch always go to the live API.
+
+### Keyboard
+
+Cmd+K (Ctrl+K on Windows) opens the command menu. `g` then `c`, `a`, `o`, `p`, `b`, `s` or `l` jumps to a page; `t` switches the theme; `!` goes to the kill switch; `?` lists everything.
 
 ### Optional: a PIN (needed for phone access later)
 
@@ -188,6 +203,20 @@ The analyst's token (in `data/analyst.token`, created by the API) may read anyth
 
 `GET /alerts?after=<id>&limit=50`: `{ latestId, alerts: [{ id, level: "info" | "warn" | "critical", kind, message, orderId, createdAt }] }`. With `after`, oldest first; without, newest first.
 
+`GET /session`: `{ local, unlocked, pinRequired, lanEnabled }`. `POST /session` with `{ "pin": "1234" }` unlocks a phone: it sets an HttpOnly cookie valid for 12 hours. Anything else from a locked phone gets `401 { error, locked: true }`.
+
+`GET /performance`: `{ curve: [{ t, equity, drawdownPct }], daily: [{ day, pnl, pnlPct }], windows: [{ days, actualDays, from, returnPct, btcPct }], summary: { startEquity, equity, totalReturnPct, maxDrawdownPct, trades, wins, fees, realisedPnl } }`. All after fees.
+
+`POST /settings/preview` with `{ file: "risk.json" | "strategy.json", changes: { key: value } }`: `{ lines: [{ key, old, new, ok, reason, restart }] }`.
+
+`POST /settings` with `{ file, changes, pin }`: all changes apply together or none do. `400` with the reason if any value is outside its range, `403` for a wrong PIN, `409` if no PIN is set. Settings marked `restart` (the pairs list and the feed thresholds) take effect after restarting `npm run dev`; the rest on the next check.
+
+`GET /settings/history`: `{ history: [{ id, file, key, old, new, createdAt }], needsRestart }`.
+
+`GET /audit?type=&actor=&q=&before=&limit=100`: newest first, `{ entries: [{ id, eventType, actor, payload, createdAt, hash, prevHash }], types, actors }`.
+
+`GET /audit/verify`: recomputes every hash. `{ ok: true, checked, lastHash, ms }` or `{ ok: false, checked, badId, problem, ms }`.
+
 `GET /settings`: both config files (`strategy`, `risk`) with each setting's value, allowed range and plain-language help.
 
 `GET /backtests/data`: `{ "pairs", "files": [{ "pair", "timeframe", "candles", "first", "last" }], "range": { "from", "to" } | null, "hint" }`
@@ -203,7 +232,7 @@ The analyst's token (in `data/analyst.token`, created by the API) may read anyth
 - Every process refuses to start if an exchange URL isn't a known testnet or demo URL.
 - `TRADING_MODE` must be `backtest`, `paper` or `testnet`. There is no live mode.
 - The analyst refuses to start if any exchange key variable is visible to it.
-- The API listens on 127.0.0.1 unless `ALLOW_LAN=true` and a PIN hash are set.
+- The API always listens on 127.0.0.1. With `ALLOW_LAN=true` (and a PIN hash), only the dashboard's port 3000 opens to your Wi-Fi, through a small gateway that tells the API who is really asking; a phone must enter the PIN first.
 - Logs redact key fields and scrub key values from error messages.
 - New signals pause whenever either price feed is stale (15 s), down, or disagrees with the other by more than 50 bps, and resume only after 60 s of agreement. If the feed process itself stops, prices are treated as untrusted.
 - Three failed exchange health checks in a row discard that exchange's pending signals.

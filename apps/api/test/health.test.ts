@@ -48,11 +48,11 @@ describe("CFG-07 the real server binds where it should", () => {
     expect(address).toBe("127.0.0.1");
   });
 
-  it("CFG-07 listens on all interfaces only when LAN is enabled", async () => {
+  it("CFG-07 stays on loopback even when LAN is enabled: phones reach it only through the gateway", async () => {
     const { server, address } = await listen(
       loadBaseEnv(validEnv({ ALLOW_LAN: "true", PIN_HASH: hashPin("2468") })),
     );
     server.close();
-    expect(address).toBe("0.0.0.0");
+    expect(address).toBe("127.0.0.1");
   });
 });

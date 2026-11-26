@@ -85,7 +85,7 @@ export function KillSwitch({ v, onChange }: { v: RiskView; onChange: () => void 
   );
 
   return (
-    <section aria-labelledby="ks" className={`rounded-2xl border-2 p-5 shadow-sm ${state.kind === "trading" || state.kind === "daily-stop" ? "border-down/40 bg-panel" : "border-down bg-down/5"}`}>
+    <section id="kill-switch" aria-labelledby="ks" className={`rounded-2xl border-2 p-5 shadow-sm ${state.kind === "trading" || state.kind === "daily-stop" ? "border-down/40 bg-panel" : "border-down bg-down/5"}`}>
       <h2 id="ks" className="text-xl font-black">Kill switch</h2>
 
       {(state.kind === "trading" || state.kind === "daily-stop") && (
@@ -108,7 +108,7 @@ export function KillSwitch({ v, onChange }: { v: RiskView; onChange: () => void 
             className="relative grid h-40 w-40 shrink-0 touch-none select-none place-items-center rounded-full"
           >
             <svg viewBox="0 0 160 160" className="absolute inset-0" aria-hidden="true">
-              <circle cx="80" cy="80" r="70" fill="var(--color-down)" />
+              <circle cx="80" cy="80" r="70" fill="#be123c" />
               <circle cx="80" cy="80" r="70" fill="none" stroke="#fff" strokeOpacity="0.35" strokeWidth="8" />
               <circle cx="80" cy="80" r="70" fill="none" stroke="#fff" strokeWidth="8" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - progress)} transform="rotate(-90 80 80)" />
             </svg>

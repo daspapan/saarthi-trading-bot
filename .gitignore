@@ -12,5 +12,6 @@ data/*.db
 data/*.db-*
 data/candles/*.csv
 data/analyst.token
+data/session.secret
 data/headlines.txt
 .DS_Store

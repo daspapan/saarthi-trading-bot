@@ -269,3 +269,31 @@ The validator and "what happened next" boxes are placeholders until phases 5 and
 **The Cockpit is now the home page.** The kill switch is a 160 px button you press and hold for two seconds (or hold Space / Enter); a ring fills as you hold, and letting go early cancels. The three gauges (daily loss used, drawdown, exposure) each fill toward their own limit and carry a word (OK, WARNING, LIMIT) as well as a colour. The light theme stays as you asked, instead of the spec's dark default. The full phone layout (bottom navigation, kill switch always reachable) is phase 8; for now the top navigation scrolls sideways on a phone.
 
 **Phase 7 test IDs:** RISK-01 to RISK-12, AL-01, AL-02, INT-06 and INT-09 (kill switch and drawdown with three positions on the paper exchange), API tests for `/kill`, `/restart`, `/risk` and `/alerts`, the terminal kill command, and UI-05 to UI-07 display logic.
+
+## Phase 8
+
+**Phone access through a gateway, and the API never leaves this computer.** Phase 1 bound the API to 0.0.0.0 when `ALLOW_LAN=true`, which would have let anything on the Wi-Fi call it without a PIN. Now the API always binds 127.0.0.1. With `ALLOW_LAN=true`, `npm run dev` starts Next.js on 127.0.0.1:3001 and a small gateway on port 3000 for the network (`scripts/lanGateway.ts`). The gateway stamps every request with the caller's real address in `x-saarthi-client`, overwriting whatever the caller sent, and Next.js passes it on to the API. The API trusts that header only on a connection from 127.0.0.1, so a phone can neither fake it through the gateway nor reach the API directly. Requests from anywhere but this computer get `401 locked` until `POST /session` with the PIN, which sets an HttpOnly, SameSite=Strict cookie (an expiry time plus its HMAC, signed with a random secret in `data/session.secret`) valid for 12 hours. The PIN is still asked again for the kill switch, restarts and settings. I checked this end to end on a real network address: locked from the LAN, a spoofed header still locked, the API port unreachable from the LAN, unlocked after the PIN.
+
+**Settings changes** go through the same `checkValue` the loader uses, so the dashboard can't set anything the file itself would refuse. Ranges, help text and the allowed lists can't be changed from the UI. All changes in one request are applied together or not at all: the history rows, the audit rows and the file write happen in one transaction, and the file is written to a temporary file and renamed over the old one. The new text is parsed back before it's written. A wrong PIN is audited, with the same 5-per-minute lockout as the kill switch. Most settings take effect on the next check (the validator, executor and risk monitor read the files each time); the pairs list and the feed thresholds are read once when the feed starts, so the page says when a restart is needed.
+
+**Verify chain** walks the whole log and recomputes each hash. It names the first bad row: "edited" when a row's own hash doesn't match its contents, "does not point at the row before it" when a row was deleted or inserted. The tests tamper the way someone with the database file would: drop the append-only triggers, then edit.
+
+**Performance** comes from the 10-second equity snapshots, thinned to one point per hour on the chart (per minute for short histories). Daily P&L is each UTC day's last equity minus that day's starting equity. Returns over 30, 60 and 90 days are compared with buying and holding BTC over the same span, using the candle closest before the start. If the history is shorter than the window, the page says how many days it really covers rather than pretending.
+
+**Dark mode** is a switch, with light as the default you chose. It overrides the colour variables, so every page follows. The theme is applied by a two-line script before the page paints, so there's no light flash. The kill button uses a fixed deep red in both themes, because the lighter red of the dark palette was too faint behind white text.
+
+**Phone layout:** below 640 px a bottom bar shows Cockpit, Orders, AI, Results and a red STOP button in the middle that opens the kill switch in a sheet from any page.
+
+**Installable app:** a web manifest, icons (an original design: a white upward chevron over a red stop bar) and a service worker. The service worker caches only the offline page and never touches `/backend/*`, so prices, orders and the kill switch always come live. Browsers only run service workers on https or localhost; over plain http on Wi-Fi, "Add to Home Screen" still works, just without the offline page.
+
+**Command menu and shortcuts:** Cmd/Ctrl+K searches pages and actions (with typo-tolerant matching). Single keys work everywhere except in text fields: `g` + a letter for pages, `t` theme, `!` kill switch, `?` help.
+
+**Tooltips:** terms such as RSI, ATR, drawdown and OCO are dotted-underlined and explained in plain language on hover, keyboard focus or tap.
+
+**Rolling numbers:** equity and today's P&L roll to new values over 0.6 seconds, easing out; with reduced motion they just change.
+
+**Small fixes found while building:** prices in order messages no longer show floating-point tails (98249.09999999999 is now 98249.1). The disclaimer banner and toasts no longer use hard-coded colours, so they follow the theme.
+
+**A test from a LinkedIn comment (INT-10):** Anton Kann suggested halting and resuming while the worker is paused, with an approved order already queued. Two tests now cover it. In the first, the queued order is discarded the moment the halt is pressed, resuming is refused while the worker is paused (the halt stays open until the worker confirms everything is closed), and when the worker comes back it cancels the protective orders and sells, and never sends the queued order. In the second, the worker had already claimed the order but not sent it: the order is cancelled and nothing reaches the exchange.
+
+**Phase 8 test IDs:** AUD-01 to AUD-04, CFG-04, CFG-07 (sessions, the gateway, the API lock), INT-10, the API tests for the new endpoints, and UI-08 to UI-14 for the display logic (calendar, returns wording, settings labels and diffs, command menu, shortcuts, glossary, rolling numbers, audit lines).

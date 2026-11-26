@@ -12,7 +12,30 @@
   --color-down: #be123c;     /* red */
   --color-warn: #b45309;     /* amber */
   --color-accent: #0369a1;   /* blue */
+  --color-banner: #fff4e0;   /* disclaimer banner */
+  --color-banner-text: #7c2d12;
+  --color-warn-soft: #fff7ea; /* warning toast */
+  --color-down-soft: #fff0f2; /* critical toast */
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+/* Dark theme (toggle in the menu, or Cmd+K > "Switch theme"). Same contrast rules:
+   nothing important in dim grey, colours always paired with a word. */
+html[data-theme="dark"] {
+  --color-ink: #0b1220;
+  --color-panel: #121a2b;
+  --color-line: #2a3650;
+  --color-text: #eef2f8;
+  --color-muted: #b6c2d6;
+  --color-up: #34d399;
+  --color-down: #fb7185;
+  --color-warn: #fbbf24;
+  --color-accent: #38bdf8;
+  --color-banner: #3a2a0c;
+  --color-banner-text: #fde7c2;
+  --color-warn-soft: #2e2410;
+  --color-down-soft: #34141c;
+  color-scheme: dark;
 }
 
 html {
@@ -83,9 +106,19 @@ html {
 /* Risk gauges fill smoothly. */
 .gauge-arc { transition: stroke-dashoffset 0.8s ease-out, stroke 0.3s; }
 
+/* Bottom sheet (phone kill switch) and command palette slide in. */
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: none; } }
+.sheet-up { animation: sheet-up 0.25s ease-out both; }
+@keyframes pop-in { from { opacity: 0; transform: scale(0.97) translateY(-6px); } to { opacity: 1; transform: none; } }
+.pop-in { animation: pop-in 0.18s ease-out both; }
+
+/* Audit "Verify chain": rows tick green one after another. */
+@keyframes verify-row { from { background: rgb(4 120 87 / 0.18); } to { background: transparent; } }
+.verify-row { animation: verify-row 1.2s ease-out both; }
+
 /* Respect people who ask for less motion: arrows stand still, no flashing. */
 @media (prefers-reduced-motion: reduce) {
-  .arrow-rise, .arrow-sink, .attention, .flash-up, .flash-down, .slide-in, .evidence-tick, .evidence-row, .step-current {
+  .arrow-rise, .arrow-sink, .attention, .flash-up, .flash-down, .slide-in, .evidence-tick, .evidence-row, .step-current, .sheet-up, .pop-in, .verify-row {
     animation: none;
     opacity: 1;
     transform: none;

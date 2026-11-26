@@ -1,5 +1,7 @@
-// Where the API listens. Default is loopback only; LAN is an explicit opt-in
-// and only allowed when a PIN hash exists (the kill switch and settings need it).
+// Where the API listens: always loopback. Since phase 8 the phone reaches the
+// dashboard through the web app's LAN gateway (scripts/lanGateway.ts), and the API
+// asks it for the PIN; the API itself is never exposed to the network.
+// ALLOW_LAN still needs a PIN hash, checked here so the API refuses to start without one.
 
 import { ConfigError, type BaseEnv } from "./config/env.ts";
 
@@ -8,7 +10,7 @@ export function resolveBindHost(env: Pick<BaseEnv, "apiHost" | "allowLan" | "pin
     if (!env.pinHash) {
       throw new ConfigError("ALLOW_LAN=true needs PIN_HASH to be set first (npm run pin:hash -- <pin>).");
     }
-    return "0.0.0.0";
+    return "127.0.0.1";
   }
   const loopback = ["127.0.0.1", "localhost", "::1"];
   if (!loopback.includes(env.apiHost)) {

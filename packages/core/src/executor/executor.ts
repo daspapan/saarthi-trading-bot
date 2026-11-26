@@ -60,6 +60,9 @@ export type ExecutorDeps = {
 
 export const defaultBackoff = (attempt: number) => Math.min(30_000, 1_000 * 2 ** Math.max(0, attempt - 1));
 
+/** Prices in messages: no floating-point tails like 98249.09999999999. */
+const px = (p: number | null) => (p === null ? "?" : String(Number(p.toPrecision(10))));
+
 const silent: Log = { info: () => {}, warn: () => {}, error: () => {} };
 
 export class Executor {
@@ -260,16 +263,16 @@ export class Executor {
           exit_price: ex.avgPrice, exit_fee: ex.fee, close_reason: "exit-signal", realised_pnl: pos?.realisedPnl ?? null,
         }, this.now());
       }
-      this.alert("info", "position_closed", `${o.pair} sold at ${ex.avgPrice} (exit signal). P&L after fees: ${(pos?.realisedPnl ?? 0).toFixed(2)} USDT.`, { orderId: o.id });
-      return transition(this.db, o, "CLOSED", `Sold ${ex.filled} at ${ex.avgPrice}.`, {
+      this.alert("info", "position_closed", `${o.pair} sold at ${px(ex.avgPrice)} (exit signal). P&L after fees: ${(pos?.realisedPnl ?? 0).toFixed(2)} USDT.`, { orderId: o.id });
+      return transition(this.db, o, "CLOSED", `Sold ${ex.filled} at ${px(ex.avgPrice)}.`, {
         filled_quantity: ex.filled, avg_fill_price: ex.avgPrice, exit_price: ex.avgPrice, exit_fee: ex.fee, close_reason: "exit-signal", realised_pnl: pos?.realisedPnl ?? null,
       }, this.now());
     }
 
     // A buy filled (fully, or partly and the rest cancelled): we now HOLD coins. Record the position and protect it.
     const positionId = openPosition(this.db, { pair: o.pair, orderId: o.id, quantity: ex.filled, avgEntry: ex.avgPrice!, stop: o.stop_price, target: o.target_price, fee: ex.fee, nowMs: this.now() });
-    this.alert("info", "order_filled", `${o.pair} buy filled: ${ex.filled} at ${ex.avgPrice}${partial ? ` (partial: ${ex.filled} of ${o.quantity}; the rest was cancelled)` : ""}.`, { orderId: o.id });
-    return transition(this.db, o, "PLACE_PROTECTION", partial ? `Partly filled: protecting the ${ex.filled} that filled; the rest was cancelled.` : `Filled ${ex.filled} at ${ex.avgPrice}.`, {
+    this.alert("info", "order_filled", `${o.pair} buy filled: ${ex.filled} at ${px(ex.avgPrice)}${partial ? ` (partial: ${ex.filled} of ${o.quantity}; the rest was cancelled)` : ""}.`, { orderId: o.id });
+    return transition(this.db, o, "PLACE_PROTECTION", partial ? `Partly filled: protecting the ${ex.filled} that filled; the rest was cancelled.` : `Filled ${ex.filled} at ${px(ex.avgPrice)}.`, {
       filled_quantity: ex.filled, avg_fill_price: ex.avgPrice, entry_fee: ex.fee, position_id: positionId,
     }, this.now());
   }
@@ -336,8 +339,8 @@ export class Executor {
     const pos = closePosition(this.db, o.pair, leg.avgPrice!, leg.filled, leg.fee, this.now());
     const pnl = pos?.realisedPnl ?? 0;
     this.alert(reason === "stop" ? "warn" : "info", reason === "stop" ? "stop_hit" : "target_hit",
-      `${o.pair} ${reason === "stop" ? "stop" : "target"} hit at ${leg.avgPrice}. P&L after fees: ${pnl.toFixed(2)} USDT.`, { orderId: o.id });
-    return transition(this.db, o, "CLOSED", `${reason === "stop" ? "Stop" : "Target"} hit at ${leg.avgPrice}. P&L after fees ${pnl.toFixed(2)} USDT.`, {
+      `${o.pair} ${reason === "stop" ? "stop" : "target"} hit at ${px(leg.avgPrice)}. P&L after fees: ${pnl.toFixed(2)} USDT.`, { orderId: o.id });
+    return transition(this.db, o, "CLOSED", `${reason === "stop" ? "Stop" : "Target"} hit at ${px(leg.avgPrice)}. P&L after fees ${pnl.toFixed(2)} USDT.`, {
       exit_price: leg.avgPrice, exit_fee: leg.fee, close_reason: reason, realised_pnl: pnl,
     }, this.now());
   }
@@ -376,11 +379,11 @@ export class Executor {
     const reason = o.close_reason ?? "emergency";
     const pnl = `P&L after fees: ${(pos?.realisedPnl ?? 0).toFixed(2)} USDT.`;
     if (reason === "emergency") {
-      this.alert("critical", "emergency_closed", `${o.pair}: emergency sale done at ${sold.avgPrice}. ${pnl} The kill switch stays on until you restart it.`, { orderId: o.id });
+      this.alert("critical", "emergency_closed", `${o.pair}: emergency sale done at ${px(sold.avgPrice)}. ${pnl} The kill switch stays on until you restart it.`, { orderId: o.id });
     } else {
-      this.alert("warn", "position_closed", `${o.pair} sold at ${sold.avgPrice} (${reason === "drawdown" ? "drawdown limit" : "kill switch"}). ${pnl}`, { orderId: o.id });
+      this.alert("warn", "position_closed", `${o.pair} sold at ${px(sold.avgPrice)} (${reason === "drawdown" ? "drawdown limit" : "kill switch"}). ${pnl}`, { orderId: o.id });
     }
-    return transition(this.db, o, "CLOSED", `${reason === "emergency" ? "Emergency sale" : reason === "drawdown" ? "Sold by the drawdown stop" : "Sold by the kill switch"}: ${sold.filled} at ${sold.avgPrice}.`, {
+    return transition(this.db, o, "CLOSED", `${reason === "emergency" ? "Emergency sale" : reason === "drawdown" ? "Sold by the drawdown stop" : "Sold by the kill switch"}: ${sold.filled} at ${px(sold.avgPrice)}.`, {
       exit_price: sold.avgPrice, exit_fee: sold.fee, close_reason: reason, realised_pnl: pos?.realisedPnl ?? null,
     }, this.now());
   }
